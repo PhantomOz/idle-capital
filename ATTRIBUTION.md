@@ -35,6 +35,11 @@ video — which is narrated by a team member and is not AI-generated.
 | `.gitignore` | `AI` | Standard ignores |
 | `specs/` | `AI+H` | Specs drafted by AI from team requirements, reviewed and approved before build |
 | `prompts/` | `H` | Verbatim session prompts issued by the team |
+| `specs/plans/` | `AI+H` | Implementation plans drafted by AI; task decomposition reviewed and approved |
+| `package.json`, `pnpm-workspace.yaml`, `tsconfig.base.json`, `vitest.config.ts` | `AI` | Workspace scaffolding |
+| `packages/core/**` | `AI` | Domain types and money helpers; reviewed by the team |
+| `packages/obligations/**` | `AI` | FX table and buffer math; rates and rounding direction reviewed by the team |
+| `packages/kernel/**` | `AI` | Invariants K1-K8 and validate(); invariant semantics and the veto/escalate split are team decisions (see DECISIONS.md D-006) |
 
 *(Rows are appended as files land. See git history for the ordering.)*
 
