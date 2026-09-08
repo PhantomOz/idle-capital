@@ -20,6 +20,12 @@ importers:
 
   packages/core: {}
 
+  packages/kernel:
+    dependencies:
+      '@idle/core':
+        specifier: workspace:*
+        version: link:../core
+
   packages/obligations:
     dependencies:
       '@idle/core':
