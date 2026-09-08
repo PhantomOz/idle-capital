@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { Market, Policy, Proposal, TreasuryState } from "@idle/core";
-import { k2Conservation, k8WellFormed } from "../src/index.js";
+import {
+  k1BufferCoverage, k2Conservation, k3MarketExists, k4Allowlist, k8WellFormed,
+} from "../src/index.js";
 
 const ASOF = new Date("2026-09-09T00:00:00Z");
 
@@ -112,5 +114,61 @@ describe("k2Conservation", () => {
   it("rejects a proposal that loses USDC", () => {
     const p: Proposal = { hold: 1n, allocations: [], rationale: "x" };
     expect(k2Conservation(p, state())?.invariant).toBe("K2");
+  });
+});
+
+describe("k1BufferCoverage", () => {
+  it("passes when hold covers the buffer times the safety factor", () => {
+    // 30_000_000 * 1.15 = 34_500_000
+    const p: Proposal = { hold: 34_500_000n, allocations: [], rationale: "x" };
+    expect(k1BufferCoverage(p, state(), policy())).toBeNull();
+  });
+
+  it("passes when hold exceeds the requirement", () => {
+    const p: Proposal = { hold: 90_000_000n, allocations: [], rationale: "x" };
+    expect(k1BufferCoverage(p, state(), policy())).toBeNull();
+  });
+
+  it("rejects hold one unit below the requirement", () => {
+    const p: Proposal = { hold: 34_499_999n, allocations: [], rationale: "x" };
+    const b = k1BufferCoverage(p, state(), policy());
+    expect(b?.invariant).toBe("K1");
+    expect(b?.limit).toContain("34500000");
+  });
+
+  it("applies the safety multiplier rather than the raw buffer", () => {
+    const p: Proposal = { hold: 30_000_000n, allocations: [], rationale: "x" };
+    expect(k1BufferCoverage(p, state(), policy())?.invariant).toBe("K1");
+  });
+
+  it("passes trivially when nothing is owed", () => {
+    const p: Proposal = { hold: 0n, allocations: [], rationale: "x" };
+    expect(k1BufferCoverage(p, state({ bufferRequiredUsdc: 0n }), policy())).toBeNull();
+  });
+});
+
+describe("k3MarketExists", () => {
+  it("passes when every target is in this run's live market set", () => {
+    const p: Proposal = { hold: 0n, allocations: [{ marketId: "m1", amountUsdc: 1n }], rationale: "x" };
+    expect(k3MarketExists(p, state())).toBeNull();
+  });
+
+  it("rejects a market the agent invented", () => {
+    const p: Proposal = { hold: 0n, allocations: [{ marketId: "ghost", amountUsdc: 1n }], rationale: "x" };
+    const b = k3MarketExists(p, state());
+    expect(b?.invariant).toBe("K3");
+    expect(b?.observed).toContain("ghost");
+  });
+});
+
+describe("k4Allowlist", () => {
+  it("passes when every target is allowlisted", () => {
+    const p: Proposal = { hold: 0n, allocations: [{ marketId: "m2", amountUsdc: 1n }], rationale: "x" };
+    expect(k4Allowlist(p, policy())).toBeNull();
+  });
+
+  it("rejects a real market that the operator has not permitted", () => {
+    const p: Proposal = { hold: 0n, allocations: [{ marketId: "m3", amountUsdc: 1n }], rationale: "x" };
+    expect(k4Allowlist(p, policy())?.invariant).toBe("K4");
   });
 });
