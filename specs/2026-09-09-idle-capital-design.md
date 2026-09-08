@@ -146,7 +146,11 @@ scheduleByCurrency(obligations: Obligation[], horizonDays: number, asOf: Date): 
 ```
 
 Money is `bigint` minor units everywhere. No floating-point currency arithmetic
-crosses a package boundary.
+crosses a package boundary. Ratios are therefore expressed in basis points, so a
+policy factor can be applied to a `bigint` without a float touching money.
+
+Conversions round **up**. Under-reserving is the unsafe direction: a buffer that
+is one unit too large costs nothing, one unit too small can miss payroll.
 
 ### `kernel`
 
@@ -155,9 +159,9 @@ type Allocation = { marketId: string; amountUsdc: bigint };
 
 type Policy = {
   bufferHorizonDays: number;        // obligations within this window must stay covered
-  bufferMultiplier: number;         // safety factor on the buffer, e.g. 1.15
+  bufferMultiplierBps: number;      // safety factor in basis points, 11500 = 1.15x
   venueAllowlist: string[];         // permitted market ids
-  maxVenueConcentration: number;    // fraction of parked capital, e.g. 0.5
+  maxVenueConcentrationBps: number; // share of parked capital, 5000 = 50%
   maxRunMovementUsdc: bigint;       // ceiling on total moved in one run
   minVenueLiquidityUsd: number;     // liquidity floor a venue must clear
 };
@@ -225,7 +229,7 @@ severity that determines whether a breach vetoes or escalates.
 | K2 | Conservation: `hold + Σ allocations == available balance` | veto |
 | K3 | Every `marketId` exists in the live market set fetched this run | veto |
 | K4 | No allocation to a market absent from the venue allowlist | veto |
-| K5 | No single market exceeds `maxVenueConcentration` of parked capital | escalate |
+| K5 | No market exceeds `maxVenueConcentrationBps` of parked capital *after* the run | escalate |
 | K6 | Total moved this run ≤ `maxRunMovementUsdc` | escalate |
 | K7 | Every target market has `liquidityUsd ≥ minVenueLiquidityUsd` | escalate |
 | K8 | No allocation amount ≤ 0; no duplicate `marketId` | veto |
