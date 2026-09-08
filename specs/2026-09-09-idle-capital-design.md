@@ -111,10 +111,17 @@ type Market = {
   protocol: string;        // e.g. "aave-v3"
   chain: string;
   asset: { symbol: string; decimals: number; address: string };
-  supplyApy: number;       // fraction, e.g. 0.0431
+  /**
+   * Fraction, e.g. 0.0431. NOTE: the Messari schema reports PERCENT
+   * ("3.0674..." = 3.07%) and returns several rates per market including a
+   * BORROWER/STABLE rate of 0. The adapter filters `side: LENDER,
+   * type: VARIABLE` and divides by 100. See specs/spikes/ F1.
+   */
+  supplyApy: number;
   totalSuppliedUsd: number;
   totalBorrowedUsd: number;
-  liquidityUsd: number;    // supplied - borrowed
+  /** supplied - borrowed. MAY BE NEGATIVE on stale subgraphs — see F3. */
+  liquidityUsd: number;
 };
 
 getLendingMarkets(opts?: { assetSymbols?: string[] }): Promise<Market[]>;
@@ -125,7 +132,11 @@ returning markets across every indexed lending protocol. **This is the standards
 leverage:** N protocols compared with zero per-protocol integration code. Adding
 a protocol is a data change, not a code change.
 
-On query failure this **throws**. There is no fallback. (D-007)
+Fails **closed on quorum**: if fewer than `minProtocolQuorum` protocols return
+usable markets, this throws and the run fails. Individual indexer
+unavailability is expected on the decentralized network (11 of 46 deployments
+were unreachable during the spike) and is not a run failure. There is no cache
+and no fixture path either way. (D-007, refined by D-009)
 
 ### `obligations`
 
@@ -316,7 +327,8 @@ and it is built before the happy path.
 
 | Failure | Handling |
 |---|---|
-| Graph query fails | Run → `FAILED`. No cache, no fixtures. (D-007) |
+| Graph quorum not met | Run → `FAILED`. No cache, no fixtures. (D-009) |
+| Individual subgraph unreachable | Logged and skipped; expected on a decentralized network |
 | Agent returns unparseable output | Kernel K8 veto → `FAILED`, output stored verbatim |
 | Agent times out | One retry, then `FAILED` |
 | Kernel escalation | `AWAITING_APPROVAL` — expected, not an error |
@@ -371,7 +383,7 @@ errors — never on a policy denial or a revert.
 
 | Sev | Risk | Mitigation |
 |---|---|---|
-| High | Messari standardized schema may not cover enough lending markets for a credible comparison | **Spike first, before anything is built on it.** If it fails we pivot the query layer Wednesday, not Saturday. |
+| ~~High~~ **RETIRED** | Messari schema coverage | **Spike complete 2026-09-09 — GO.** 25 protocols, 142 stablecoin markets, one query document. See `specs/spikes/2026-09-09-graph-schema-spike.md`. |
 | High | Arc requires frontend + backend + diagram + docs on all three tracks | Full day reserved Saturday; diagram written alongside the build |
 | Medium | Privy Earn vaults may need guided onboarding, which cannot be mocked for credit | Verify Wednesday. Fallback: stablecoin transfer flow, also explicitly eligible |
 | Medium | Continuous commit history is enforced; squashing or a single push may disqualify | Conventions landed at commit 1; commit continuously, never squash |

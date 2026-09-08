@@ -136,3 +136,47 @@ plainly that the build was AI-assisted and shows its specs is in a stronger
 position than one that gets asked and looks evasive. The trailers are not the
 attribution mechanism — `ATTRIBUTION.md` is — but there is no upside to being
 quieter about it than we have to be.
+
+---
+
+## D-009 — Graph query fails on quorum, not on any single subgraph
+
+**Date:** 2026-09-09 · **Status:** Adopted · **Refines:** D-007
+
+D-007 said a failed Graph query fails the run. The spike showed that is
+unworkable as written: 11 of 46 lending deployments were unreachable at probe
+time — "no allocations", "bad indexers", ordinary decentralized-network churn
+with no fault on our side. A rule that fails the run whenever any one of 25
+subgraphs is mid-reallocation would brick the product most days.
+
+The rule is now a **quorum**: the run fails if fewer than `minProtocolQuorum`
+protocols return usable markets. An individual unreachable subgraph is logged
+and skipped.
+
+**What does not change:** there is still no cache fallback and no fixture path
+on any runtime code path. D-007's actual purpose — never quietly serving stale
+or mocked data to a track that forbids it — is untouched. What changed is the
+granularity of "failure", not the honesty rule.
+
+---
+
+## D-010 — The venue allowlist and liquidity floor are load-bearing, and the spike proved it
+
+**Date:** 2026-09-09 · **Status:** Adopted · **Evidence:** spike F3, F4
+
+Ranking the live market set by yield puts **rari-fuse FRAX at 174.24% APY with
+negative $4.7M liquidity** at the top. Rari Fuse was exploited and abandoned in
+2022; its subgraph still answers, and still reports the best yield in the set.
+Iron Bank USDT reports 75.10%. Aave v3 USDC reports a genuine 12.85% on $2.16bn
+of deposits with $0.2M of liquidity — the rate is real, the exit is not.
+
+An agent optimising naively for APY sends the treasury to the first of these.
+
+K4 (venue allowlist) and K7 (liquidity floor) were written as prudent hardening
+before any data existed. They are now the two invariants standing between the
+agent and a live trap that the highest-yield sort surfaces on the first query.
+
+**Consequence for the demo:** show this. A yield ranking with rari-fuse at the
+top, and the kernel refusing it, argues the product's whole thesis — the agent
+proposes, the kernel disposes — better than any explanation of the
+architecture.
