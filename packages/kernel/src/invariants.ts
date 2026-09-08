@@ -1,0 +1,221 @@
+import { applyBpsCeil } from "@idle/core";
+import type { Breach, Policy, Proposal, TreasuryState } from "@idle/core";
+
+function breach(
+  invariant: Breach["invariant"], message: string, observed: string, limit: string,
+): Breach {
+  return { invariant, message, observed, limit };
+}
+
+function isBigInt(v: unknown): v is bigint {
+  return typeof v === "bigint";
+}
+
+/**
+ * K8 — structural well-formedness. VETO.
+ *
+ * Runs first and takes `unknown`, because everything downstream assumes a
+ * typed Proposal and the agent is not trusted to produce one. TypeScript
+ * types are erased at runtime; this is the only thing standing between a
+ * hallucinated shape and the money-moving path.
+ */
+export function k8WellFormed(proposal: unknown): Breach | null {
+  if (typeof proposal !== "object" || proposal === null || Array.isArray(proposal)) {
+    return breach("K8", "Proposal is not an object", String(proposal), "object");
+  }
+  const p = proposal as Record<string, unknown>;
+
+  if (!isBigInt(p.hold)) {
+    return breach("K8", "hold is not a bigint", typeof p.hold, "bigint");
+  }
+  if (p.hold < 0n) {
+    return breach("K8", "hold is negative", p.hold.toString(), ">= 0");
+  }
+  if (typeof p.rationale !== "string") {
+    return breach("K8", "rationale is not a string", typeof p.rationale, "string");
+  }
+  if (!Array.isArray(p.allocations)) {
+    return breach("K8", "allocations is not an array", typeof p.allocations, "array");
+  }
+
+  const seen = new Set<string>();
+  for (const raw of p.allocations) {
+    if (typeof raw !== "object" || raw === null) {
+      return breach("K8", "allocation is not an object", String(raw), "object");
+    }
+    const a = raw as Record<string, unknown>;
+    if (typeof a.marketId !== "string" || a.marketId.length === 0) {
+      return breach("K8", "allocation marketId is not a non-empty string", String(a.marketId), "string");
+    }
+    if (!isBigInt(a.amountUsdc)) {
+      return breach("K8", `allocation ${a.marketId} amountUsdc is not a bigint`, typeof a.amountUsdc, "bigint");
+    }
+    if (a.amountUsdc <= 0n) {
+      return breach("K8", `allocation ${a.marketId} is not positive`, a.amountUsdc.toString(), "> 0");
+    }
+    if (seen.has(a.marketId)) {
+      return breach("K8", `duplicate allocation to market ${a.marketId}`, a.marketId, "unique market ids");
+    }
+    seen.add(a.marketId);
+  }
+  return null;
+}
+
+/**
+ * K2 — conservation. VETO.
+ *
+ * Every available unit is either held or allocated. A proposal that does not
+ * balance is either conjuring USDC or silently stranding it, and neither is
+ * something a human should be asked to approve.
+ */
+export function k2Conservation(p: Proposal, s: TreasuryState): Breach | null {
+  const allocated = p.allocations.reduce((sum, a) => sum + a.amountUsdc, 0n);
+  const total = p.hold + allocated;
+  if (total !== s.availableUsdc) {
+    return breach(
+      "K2",
+      "hold plus allocations does not equal the available balance",
+      `${total} (hold ${p.hold} + allocated ${allocated})`,
+      s.availableUsdc.toString(),
+    );
+  }
+  return null;
+}
+
+/**
+ * K1 — buffer coverage. VETO.
+ *
+ * The retained liquid balance must cover obligations at the policy horizon,
+ * scaled by the safety factor. This is the invariant the whole product exists
+ * to hold: park the surplus, never the payroll.
+ */
+export function k1BufferCoverage(p: Proposal, s: TreasuryState, pol: Policy): Breach | null {
+  const required = applyBpsCeil(s.bufferRequiredUsdc, pol.bufferMultiplierBps);
+  if (p.hold < required) {
+    return breach(
+      "K1",
+      `retained balance does not cover obligations over ${pol.bufferHorizonDays} days`,
+      p.hold.toString(),
+      `${required} (buffer ${s.bufferRequiredUsdc} x ${pol.bufferMultiplierBps}bps)`,
+    );
+  }
+  return null;
+}
+
+/**
+ * K3 — market existence. VETO.
+ *
+ * Checked against the market set fetched THIS run, not a cached list. An
+ * agent that names a market which no longer exists is proposing a transfer
+ * into nothing.
+ */
+export function k3MarketExists(p: Proposal, s: TreasuryState): Breach | null {
+  const live = new Set(s.markets.map((m) => m.id));
+  for (const a of p.allocations) {
+    if (!live.has(a.marketId)) {
+      return breach(
+        "K3",
+        `market ${a.marketId} is not in this run's live market set`,
+        a.marketId,
+        `one of ${[...live].join(", ")}`,
+      );
+    }
+  }
+  return null;
+}
+
+/**
+ * K4 — venue allowlist. VETO.
+ *
+ * A market can be real, liquid and high-yielding and still be one the
+ * operator has not agreed to hold funds in.
+ */
+export function k4Allowlist(p: Proposal, pol: Policy): Breach | null {
+  const allowed = new Set(pol.venueAllowlist);
+  for (const a of p.allocations) {
+    if (!allowed.has(a.marketId)) {
+      return breach(
+        "K4",
+        `market ${a.marketId} is not on the venue allowlist`,
+        a.marketId,
+        pol.venueAllowlist.join(", "),
+      );
+    }
+  }
+  return null;
+}
+
+/**
+ * K5 — venue concentration. ESCALATE.
+ *
+ * Measured on the position AFTER the run, including capital already parked.
+ * Measuring only this run's movement would let an agent reach any
+ * concentration it liked by splitting the approach across several runs.
+ */
+export function k5Concentration(p: Proposal, s: TreasuryState, pol: Policy): Breach | null {
+  const after = new Map<string, bigint>();
+  for (const pos of s.positions) {
+    after.set(pos.marketId, (after.get(pos.marketId) ?? 0n) + pos.amountUsdc);
+  }
+  for (const a of p.allocations) {
+    after.set(a.marketId, (after.get(a.marketId) ?? 0n) + a.amountUsdc);
+  }
+
+  let totalParked = 0n;
+  for (const amount of after.values()) totalParked += amount;
+  if (totalParked === 0n) return null;
+
+  const cap = applyBpsCeil(totalParked, pol.maxVenueConcentrationBps);
+  for (const [marketId, amount] of after) {
+    if (amount > cap) {
+      return breach(
+        "K5",
+        `market ${marketId} would hold more than the permitted share of parked capital`,
+        `${marketId} at ${amount} of ${totalParked}`,
+        `${cap} (${pol.maxVenueConcentrationBps}bps)`,
+      );
+    }
+  }
+  return null;
+}
+
+/**
+ * K6 — per-run movement ceiling. ESCALATE.
+ *
+ * Bounds the blast radius of any single bad decision, whoever made it.
+ */
+export function k6RunMovement(p: Proposal, pol: Policy): Breach | null {
+  const moved = p.allocations.reduce((sum, a) => sum + a.amountUsdc, 0n);
+  if (moved > pol.maxRunMovementUsdc) {
+    return breach(
+      "K6",
+      "this run moves more than the per-run ceiling",
+      moved.toString(),
+      pol.maxRunMovementUsdc.toString(),
+    );
+  }
+  return null;
+}
+
+/**
+ * K7 — venue liquidity floor. ESCALATE.
+ *
+ * Yield on capital that cannot be withdrawn is not yield. Only venues the
+ * proposal actually targets are checked.
+ */
+export function k7Liquidity(p: Proposal, s: TreasuryState, pol: Policy): Breach | null {
+  const byId = new Map(s.markets.map((m) => [m.id, m]));
+  for (const a of p.allocations) {
+    const m = byId.get(a.marketId);
+    if (m === undefined) continue; // K3 owns the missing-market case
+    if (m.liquidityUsd < pol.minVenueLiquidityUsd) {
+      return breach(
+        "K7",
+        `market ${a.marketId} is below the liquidity floor and may not be exitable`,
+        `${m.liquidityUsd}`,
+        `${pol.minVenueLiquidityUsd}`,
+      );
+    }
+  }
+  return null;
+}
