@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { Market, Policy, Proposal, TreasuryState } from "@idle/core";
 import {
-  k1BufferCoverage, k2Conservation, k3MarketExists, k4Allowlist, k8WellFormed,
+  k1BufferCoverage, k2Conservation, k3MarketExists, k4Allowlist,
+  k5Concentration, k6RunMovement, k7Liquidity, k8WellFormed,
 } from "../src/index.js";
 
 const ASOF = new Date("2026-09-09T00:00:00Z");
@@ -170,5 +171,84 @@ describe("k4Allowlist", () => {
   it("rejects a real market that the operator has not permitted", () => {
     const p: Proposal = { hold: 0n, allocations: [{ marketId: "m3", amountUsdc: 1n }], rationale: "x" };
     expect(k4Allowlist(p, policy())?.invariant).toBe("K4");
+  });
+});
+
+describe("k5Concentration", () => {
+  it("passes an even split at exactly the 50% cap", () => {
+    const p: Proposal = {
+      hold: 0n,
+      allocations: [
+        { marketId: "m1", amountUsdc: 50_000_000n },
+        { marketId: "m2", amountUsdc: 50_000_000n },
+      ],
+      rationale: "x",
+    };
+    expect(k5Concentration(p, state(), policy())).toBeNull();
+  });
+
+  it("escalates when one venue takes more than the cap", () => {
+    const p: Proposal = {
+      hold: 0n,
+      allocations: [
+        { marketId: "m1", amountUsdc: 60_000_000n },
+        { marketId: "m2", amountUsdc: 40_000_000n },
+      ],
+      rationale: "x",
+    };
+    const b = k5Concentration(p, state(), policy());
+    expect(b?.invariant).toBe("K5");
+    expect(b?.observed).toContain("m1");
+  });
+
+  it("counts EXISTING positions, not just this run's allocations", () => {
+    // 40m already in m1, adding 30m of a 60m run -> 70m of 100m parked = 70%
+    const p: Proposal = {
+      hold: 0n,
+      allocations: [
+        { marketId: "m1", amountUsdc: 30_000_000n },
+        { marketId: "m2", amountUsdc: 30_000_000n },
+      ],
+      rationale: "x",
+    };
+    const s = state({ positions: [{ marketId: "m1", amountUsdc: 40_000_000n }] });
+    expect(k5Concentration(p, s, policy())?.invariant).toBe("K5");
+  });
+
+  it("passes when nothing is parked at all", () => {
+    const p: Proposal = { hold: 100_000_000n, allocations: [], rationale: "x" };
+    expect(k5Concentration(p, state(), policy())).toBeNull();
+  });
+});
+
+describe("k6RunMovement", () => {
+  it("passes at exactly the cap", () => {
+    const p: Proposal = { hold: 0n, allocations: [{ marketId: "m1", amountUsdc: 1_000_000_000n }], rationale: "x" };
+    expect(k6RunMovement(p, policy())).toBeNull();
+  });
+
+  it("escalates one unit over the cap", () => {
+    const p: Proposal = { hold: 0n, allocations: [{ marketId: "m1", amountUsdc: 1_000_000_001n }], rationale: "x" };
+    expect(k6RunMovement(p, policy())?.invariant).toBe("K6");
+  });
+});
+
+describe("k7Liquidity", () => {
+  it("passes a venue above the liquidity floor", () => {
+    const p: Proposal = { hold: 0n, allocations: [{ marketId: "m1", amountUsdc: 1n }], rationale: "x" };
+    expect(k7Liquidity(p, state(), policy())).toBeNull();
+  });
+
+  it("escalates a venue we could not exit", () => {
+    const s = state({ markets: [market("m1", { liquidityUsd: 500 }), market("m2")] });
+    const p: Proposal = { hold: 0n, allocations: [{ marketId: "m1", amountUsdc: 1n }], rationale: "x" };
+    const b = k7Liquidity(p, s, policy());
+    expect(b?.invariant).toBe("K7");
+  });
+
+  it("ignores the liquidity of venues the proposal does not touch", () => {
+    const s = state({ markets: [market("m1"), market("m2", { liquidityUsd: 1 })] });
+    const p: Proposal = { hold: 0n, allocations: [{ marketId: "m1", amountUsdc: 1n }], rationale: "x" };
+    expect(k7Liquidity(p, s, policy())).toBeNull();
   });
 });

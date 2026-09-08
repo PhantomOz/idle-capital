@@ -144,3 +144,78 @@ export function k4Allowlist(p: Proposal, pol: Policy): Breach | null {
   }
   return null;
 }
+
+/**
+ * K5 — venue concentration. ESCALATE.
+ *
+ * Measured on the position AFTER the run, including capital already parked.
+ * Measuring only this run's movement would let an agent reach any
+ * concentration it liked by splitting the approach across several runs.
+ */
+export function k5Concentration(p: Proposal, s: TreasuryState, pol: Policy): Breach | null {
+  const after = new Map<string, bigint>();
+  for (const pos of s.positions) {
+    after.set(pos.marketId, (after.get(pos.marketId) ?? 0n) + pos.amountUsdc);
+  }
+  for (const a of p.allocations) {
+    after.set(a.marketId, (after.get(a.marketId) ?? 0n) + a.amountUsdc);
+  }
+
+  let totalParked = 0n;
+  for (const amount of after.values()) totalParked += amount;
+  if (totalParked === 0n) return null;
+
+  const cap = applyBpsCeil(totalParked, pol.maxVenueConcentrationBps);
+  for (const [marketId, amount] of after) {
+    if (amount > cap) {
+      return breach(
+        "K5",
+        `market ${marketId} would hold more than the permitted share of parked capital`,
+        `${marketId} at ${amount} of ${totalParked}`,
+        `${cap} (${pol.maxVenueConcentrationBps}bps)`,
+      );
+    }
+  }
+  return null;
+}
+
+/**
+ * K6 — per-run movement ceiling. ESCALATE.
+ *
+ * Bounds the blast radius of any single bad decision, whoever made it.
+ */
+export function k6RunMovement(p: Proposal, pol: Policy): Breach | null {
+  const moved = p.allocations.reduce((sum, a) => sum + a.amountUsdc, 0n);
+  if (moved > pol.maxRunMovementUsdc) {
+    return breach(
+      "K6",
+      "this run moves more than the per-run ceiling",
+      moved.toString(),
+      pol.maxRunMovementUsdc.toString(),
+    );
+  }
+  return null;
+}
+
+/**
+ * K7 — venue liquidity floor. ESCALATE.
+ *
+ * Yield on capital that cannot be withdrawn is not yield. Only venues the
+ * proposal actually targets are checked.
+ */
+export function k7Liquidity(p: Proposal, s: TreasuryState, pol: Policy): Breach | null {
+  const byId = new Map(s.markets.map((m) => [m.id, m]));
+  for (const a of p.allocations) {
+    const m = byId.get(a.marketId);
+    if (m === undefined) continue; // K3 owns the missing-market case
+    if (m.liquidityUsd < pol.minVenueLiquidityUsd) {
+      return breach(
+        "K7",
+        `market ${a.marketId} is below the liquidity floor and may not be exitable`,
+        `${m.liquidityUsd}`,
+        `${pol.minVenueLiquidityUsd}`,
+      );
+    }
+  }
+  return null;
+}
