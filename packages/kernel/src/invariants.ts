@@ -1,4 +1,5 @@
-import type { Breach, Proposal, TreasuryState } from "@idle/core";
+import { applyBpsCeil } from "@idle/core";
+import type { Breach, Policy, Proposal, TreasuryState } from "@idle/core";
 
 function breach(
   invariant: Breach["invariant"], message: string, observed: string, limit: string,
@@ -77,6 +78,69 @@ export function k2Conservation(p: Proposal, s: TreasuryState): Breach | null {
       `${total} (hold ${p.hold} + allocated ${allocated})`,
       s.availableUsdc.toString(),
     );
+  }
+  return null;
+}
+
+/**
+ * K1 — buffer coverage. VETO.
+ *
+ * The retained liquid balance must cover obligations at the policy horizon,
+ * scaled by the safety factor. This is the invariant the whole product exists
+ * to hold: park the surplus, never the payroll.
+ */
+export function k1BufferCoverage(p: Proposal, s: TreasuryState, pol: Policy): Breach | null {
+  const required = applyBpsCeil(s.bufferRequiredUsdc, pol.bufferMultiplierBps);
+  if (p.hold < required) {
+    return breach(
+      "K1",
+      `retained balance does not cover obligations over ${pol.bufferHorizonDays} days`,
+      p.hold.toString(),
+      `${required} (buffer ${s.bufferRequiredUsdc} x ${pol.bufferMultiplierBps}bps)`,
+    );
+  }
+  return null;
+}
+
+/**
+ * K3 — market existence. VETO.
+ *
+ * Checked against the market set fetched THIS run, not a cached list. An
+ * agent that names a market which no longer exists is proposing a transfer
+ * into nothing.
+ */
+export function k3MarketExists(p: Proposal, s: TreasuryState): Breach | null {
+  const live = new Set(s.markets.map((m) => m.id));
+  for (const a of p.allocations) {
+    if (!live.has(a.marketId)) {
+      return breach(
+        "K3",
+        `market ${a.marketId} is not in this run's live market set`,
+        a.marketId,
+        `one of ${[...live].join(", ")}`,
+      );
+    }
+  }
+  return null;
+}
+
+/**
+ * K4 — venue allowlist. VETO.
+ *
+ * A market can be real, liquid and high-yielding and still be one the
+ * operator has not agreed to hold funds in.
+ */
+export function k4Allowlist(p: Proposal, pol: Policy): Breach | null {
+  const allowed = new Set(pol.venueAllowlist);
+  for (const a of p.allocations) {
+    if (!allowed.has(a.marketId)) {
+      return breach(
+        "K4",
+        `market ${a.marketId} is not on the venue allowlist`,
+        a.marketId,
+        pol.venueAllowlist.join(", "),
+      );
+    }
   }
   return null;
 }
