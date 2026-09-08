@@ -153,6 +153,30 @@ crosses a package boundary.
 ```ts
 type Allocation = { marketId: string; amountUsdc: bigint };
 
+type Policy = {
+  bufferHorizonDays: number;        // obligations within this window must stay covered
+  bufferMultiplier: number;         // safety factor on the buffer, e.g. 1.15
+  venueAllowlist: string[];         // permitted market ids
+  maxVenueConcentration: number;    // fraction of parked capital, e.g. 0.5
+  maxRunMovementUsdc: bigint;       // ceiling on total moved in one run
+  minVenueLiquidityUsd: number;     // liquidity floor a venue must clear
+};
+
+type TreasuryState = {
+  availableUsdc: bigint;            // liquid, unparked
+  positions: { marketId: string; amountUsdc: bigint }[];
+  markets: Market[];                // the live set fetched THIS run
+  bufferRequiredUsdc: bigint;       // from obligations, at policy horizon
+  asOf: Date;                       // injected, never read from the clock
+};
+
+type Breach = {
+  invariant: "K1" | "K2" | "K3" | "K4" | "K5" | "K6" | "K7" | "K8";
+  message: string;                  // human-readable, shown in the approval queue
+  observed: string;                 // the value that broke it
+  limit: string;                    // the bound it broke
+};
+
 type Proposal = {
   hold: bigint;                 // USDC to keep liquid
   allocations: Allocation[];    // USDC to park, per market
@@ -220,13 +244,16 @@ An unparseable proposal is treated as K8 veto. The kernel never throws.
 ## 6 · Run state machine
 
 ```
-                 ┌─────────────────────────────────┐
-                 ▼                                 │
-  PROPOSED ──▶ VALIDATED ──┬──▶ EXECUTING ──▶ SETTLED
-      │            │       │        │
-      │            │       └──▶ AWAITING_APPROVAL ──▶ REJECTED
-      │            │
-      └──▶ FAILED ◀┴──────────────── (any state, on unrecoverable error)
+  PROPOSED ──▶ VALIDATED ──────────────▶ EXECUTING ──▶ SETTLED
+      │            │                        ▲
+      │            │                        │ human approves
+      │            └──▶ AWAITING_APPROVAL ──┤
+      │                        │            │
+      │                        └────────────┴──▶ REJECTED
+      │                          human declines
+      ▼
+    FAILED   ◀── kernel veto · Graph failure · unrecoverable execution error
+             (reachable from any state; never silently retried)
 ```
 
 | State | Meaning |
