@@ -366,7 +366,7 @@ export * from "./proposal.js";
 - [ ] **Step 7: Install and run the test to verify it passes**
 
 Run: `pnpm install && pnpm vitest run packages/core`
-Expected: PASS — 12 tests
+Expected: PASS — 11 tests
 
 - [ ] **Step 8: Verify the typecheck is clean**
 
@@ -818,8 +818,12 @@ describe("k8WellFormed", () => {
     expect(k8WellFormed({ hold: 5n, allocations: [], rationale: "hold everything" })).toBeNull();
   });
 
-  it.each([null, undefined, 42, "proposal", []])("rejects non-object input: %s", (bad) => {
-    expect(k8WellFormed(bad)?.invariant).toBe("K8");
+  // NOT it.each — it spreads array elements as arguments, so the `[]` case
+  // would pass zero args and silently test `undefined` twice instead.
+  it("rejects non-object input", () => {
+    for (const bad of [null, undefined, 42, "proposal", []]) {
+      expect(k8WellFormed(bad)?.invariant).toBe("K8");
+    }
   });
 
   it("rejects a missing allocations array", () => {
@@ -988,7 +992,7 @@ export * from "./invariants.js";
 - [ ] **Step 5: Run the test to verify it passes**
 
 Run: `pnpm install && pnpm vitest run packages/kernel`
-Expected: PASS — 18 tests
+Expected: PASS — 13 tests
 
 - [ ] **Step 6: Commit**
 
@@ -1158,7 +1162,7 @@ export function k4Allowlist(p: Proposal, pol: Policy): Breach | null {
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `pnpm vitest run packages/kernel`
-Expected: PASS — 27 tests
+Expected: PASS — 22 tests
 
 - [ ] **Step 5: Commit**
 
@@ -1354,7 +1358,7 @@ export function k7Liquidity(p: Proposal, s: TreasuryState, pol: Policy): Breach 
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `pnpm vitest run packages/kernel`
-Expected: PASS — 36 tests
+Expected: PASS — 31 tests
 
 - [ ] **Step 5: Commit**
 
@@ -1562,7 +1566,7 @@ export * from "./validate.js";
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `pnpm vitest run packages/kernel`
-Expected: PASS — 43 tests
+Expected: PASS — 38 tests
 
 - [ ] **Step 5: Run the whole suite and the typecheck**
 
@@ -1598,7 +1602,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 
 ## Definition of done
 
-- [ ] `pnpm test` passes — 43 kernel tests, 19 obligations tests, 12 core tests
+- [ ] `pnpm test` passes — 38 kernel, 19 obligations, 11 core (68 total)
 - [ ] `pnpm typecheck` is clean under `strict` with `noUncheckedIndexedAccess`
 - [ ] No float appears in any exported money signature
 - [ ] `validate()` returns a `Verdict` for every input in the malformed-input test set and throws for none
@@ -1607,7 +1611,16 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 
 ## What this plan deliberately does not cover
 
-`@idle/yields` (Task 8+) is **not** in this plan. Its interface depends on what
-the Messari standardized schema actually returns, which is unknown until the
-spike runs. Writing it now would mean placeholders. It gets its own plan once
-the spike reports.
+This plan covers spec §4 (`core`, `obligations`, `kernel` contracts) and §5
+(invariants K1–K8) in full. Deferred to later plans:
+
+| Deferred | Blocked on | Spec section |
+|---|---|---|
+| `@idle/yields` | **The Graph spike** — the interface depends on what the Messari schema actually returns | §4 |
+| `@idle/agent` | `yields` (it reasons over markets) | §4 |
+| `@idle/wallet`, `@idle/chain` | Privy + Arc credentials | §4 |
+| `apps/api` — run/intent state machine | all of the above | §6, §7, §8 |
+| `apps/web` | `apps/api` | §3 |
+
+Writing the `yields` plan before the spike reports would mean placeholders,
+which this skill forbids. It gets its own plan the moment the spike lands.
