@@ -180,3 +180,36 @@ agent and a live trap that the highest-yield sort surfaces on the first query.
 top, and the kernel refusing it, argues the product's whole thesis — the agent
 proposes, the kernel disposes — better than any explanation of the
 architecture.
+
+---
+
+## D-011 — Allocations are the target end state, not a delta
+
+**Date:** 2026-09-09 · **Status:** Adopted · **Amends:** spec §4, §5 (K2, K5, K6)
+
+`Proposal.allocations` now describes the treasury's intended end state per
+venue. `TreasuryState.totalUsdc` is the whole treasury, liquid plus parked.
+The orchestrator derives the moves by diffing target against current.
+
+**Why:** the incremental shape could not express a withdrawal. K2 balanced
+against the liquid slice only, K5 added targets on top of existing positions,
+and K8 rejects non-positive amounts — so the agent could deploy surplus and
+never pull it back. That is half the product missing: the brief's own framing
+is "how much to park, where, and *when to pull it back* against obligations."
+
+Three consequences:
+
+1. **K2** checks the whole treasury. A rebalance that moves nothing still has
+   to account for everything.
+2. **K5** reads targets directly instead of adding positions to them. The
+   split-across-runs concentration evasion the old form guarded against is now
+   impossible by construction rather than by check.
+3. **K6** measures *churn* — the sum of absolute differences between target and
+   current — rather than the size of the targets. Under the old form it summed
+   allocations, which under target semantics would charge a no-op rebalance the
+   full value of the position and breach the movement cap every time.
+
+**Discovered by wiring, not by review.** The gap only became visible when the
+orchestrator had to turn a validated proposal into actual moves and there was
+no way to express "take it out". Worth recording as evidence that building the
+execution path early surfaces design errors that reading the spec did not.
