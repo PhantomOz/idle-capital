@@ -176,6 +176,10 @@ K4 (venue allowlist) and K7 (liquidity floor) were written as prudent hardening
 before any data existed. They are now the two invariants standing between the
 agent and a live trap that the highest-yield sort surfaces on the first query.
 
+**Live figure, observed through the running API on 2026-09-09:** rari-fuse DAI
+reported **12,728,198.58% APY on negative liquidity**, ranked first of 102
+stablecoin markets across 20 protocols. The spike's 174% was the tame version.
+
 **Consequence for the demo:** show this. A yield ranking with rari-fuse at the
 top, and the kernel refusing it, argues the product's whole thesis — the agent
 proposes, the kernel disposes — better than any explanation of the
