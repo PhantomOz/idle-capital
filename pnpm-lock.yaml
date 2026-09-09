@@ -112,6 +112,15 @@ importers:
         specifier: workspace:*
         version: link:../core
 
+  packages/chain:
+    dependencies:
+      '@idle/core':
+        specifier: workspace:*
+        version: link:../core
+      viem:
+        specifier: ^2.21.0
+        version: 2.56.3(typescript@5.9.3)
+
   packages/core: {}
 
   packages/kernel:
