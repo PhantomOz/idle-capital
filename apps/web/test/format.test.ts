@@ -60,3 +60,9 @@ describe("formatLocalMinor", () => {
     expect(formatLocalMinor("240000000", "NGN")).toBe("2,400,000.00");
   });
 });
+
+describe("formatUsdCompact billions", () => {
+  it("uses billions rather than four-digit millions", () => {
+    expect(formatUsdCompact(-1_279_500_000)).toBe("-$1.3B");
+  });
+});

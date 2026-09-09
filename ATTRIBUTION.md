@@ -44,6 +44,7 @@ video — which is narrated by a team member and is not AI-generated.
 | `specs/spikes/` | `AI+H` | Spike probes written and run by AI; the GO/no-go call and its consequences are the team's |
 | `packages/ledger/**` | `AI` | Schema, state machine, intent ledger and recovery; the never-resubmit rule is a team decision (D-003) |
 | `apps/api/**` | `AI` | Ports, orchestrator, HTTP surface; policy defaults and the allowlist are team decisions (D-010) |
+| `apps/web/**` | `AI` | Ledger-sheet UI, formatters and components; visual direction and the D-013 restructure reviewed against the running page |
 
 *(Rows are appended as files land. See git history for the ordering.)*
 
