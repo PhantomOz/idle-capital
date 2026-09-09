@@ -9,7 +9,7 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit -p packages/core && tsc --noEmit -p packages/obligations && tsc --noEmit -p packages/kernel && tsc --noEmit -p packages/yields",
+    "typecheck": "tsc --noEmit -p packages/core && tsc --noEmit -p packages/obligations && tsc --noEmit -p packages/kernel && tsc --noEmit -p packages/yields && tsc --noEmit -p packages/ledger",
     "test:live": "vitest run packages/yields/test/live.integration.test.ts"
   },
   "devDependencies": {
