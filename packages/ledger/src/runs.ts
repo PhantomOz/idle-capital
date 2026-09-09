@@ -43,6 +43,7 @@ function fromJson<T>(s: string | null): T | null {
 
 type RunRow = {
   id: string; status: string; proposal: string | null; verdict: string | null;
+  error: string | null;
   created_at: string; updated_at: string;
 };
 
@@ -52,6 +53,7 @@ function hydrate(row: RunRow): Run {
     status: row.status as RunStatus,
     proposal: fromJson<Proposal>(row.proposal),
     verdict: fromJson<Verdict>(row.verdict),
+    error: row.error,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -105,7 +107,7 @@ export function listRuns(l: Ledger, status?: RunStatus): Run[] {
  * state machine.
  */
 export function transitionRun(
-  l: Ledger, id: string, to: RunStatus, patch: { verdict?: Verdict } = {},
+  l: Ledger, id: string, to: RunStatus, patch: { verdict?: Verdict; error?: string } = {},
 ): Run {
   const current = getRun(l, id);
   if (current === null) throw new Error(`Run ${id} not found`);
@@ -113,11 +115,13 @@ export function transitionRun(
     throw new IllegalTransitionError(id, current.status, to);
   }
   const now = new Date().toISOString();
-  if (patch.verdict !== undefined) {
-    l.raw.prepare("UPDATE runs SET status=?, verdict=?, updated_at=? WHERE id=?")
-      .run(to, toJson(patch.verdict), now, id);
-  } else {
-    l.raw.prepare("UPDATE runs SET status=?, updated_at=? WHERE id=?").run(to, now, id);
-  }
+  l.raw.prepare(
+    "UPDATE runs SET status=?, verdict=COALESCE(?, verdict), error=COALESCE(?, error), updated_at=? WHERE id=?",
+  ).run(
+    to,
+    patch.verdict === undefined ? null : toJson(patch.verdict),
+    patch.error ?? null,
+    now, id,
+  );
   return getRun(l, id)!;
 }
