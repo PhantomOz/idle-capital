@@ -7,6 +7,7 @@ export type RunView = {
   status: string;
   proposal: { hold: string; allocations: Allocation[]; rationale: string } | null;
   verdict: Verdict | null;
+  error: string | null;
   createdAt: string;
 };
 

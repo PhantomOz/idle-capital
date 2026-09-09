@@ -40,8 +40,11 @@ export async function startRun(deps: OrchestratorDeps, runId: string): Promise<R
   let snapshot;
   try {
     [markets, snapshot] = await Promise.all([deps.markets.fetch(), deps.treasury.snapshot()]);
-  } catch {
-    return transitionRun(ledger, runId, "FAILED");
+  } catch (e) {
+    // A run that failed without saying why is the opaque state a treasury
+    // product cannot afford. Every failure carries its reason.
+    return transitionRun(ledger, runId, "FAILED",
+      { error: `market or treasury read failed: ${e instanceof Error ? e.message : String(e)}` });
   }
 
   const bufferRequiredUsdc = bufferRequirementUsdc(obligations, policy.bufferHorizonDays, asOf);
@@ -65,8 +68,9 @@ export async function startRun(deps: OrchestratorDeps, runId: string): Promise<R
       policy,
       asOf,
     });
-  } catch {
-    return transitionRun(ledger, runId, "FAILED");
+  } catch (e) {
+    return transitionRun(ledger, runId, "FAILED",
+      { error: `agent failed: ${e instanceof Error ? e.message : String(e)}` });
   }
   attachProposal(ledger, runId, proposal);
 
@@ -120,8 +124,9 @@ async function execute(deps: OrchestratorDeps, runId: string): Promise<Run> {
       const txRef = await deps.execution.submit(intent);
       markSubmitted(ledger, intent.id, txRef);
     } catch (e) {
-      markFailed(ledger, intent.id, e instanceof Error ? e.message : String(e));
-      return transitionRun(ledger, runId, "FAILED");
+      const reason = e instanceof Error ? e.message : String(e);
+      markFailed(ledger, intent.id, reason);
+      return transitionRun(ledger, runId, "FAILED", { error: `execution failed: ${reason}` });
     }
   }
 

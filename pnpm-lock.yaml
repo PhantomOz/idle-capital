@@ -56,6 +56,12 @@ importers:
       '@hono/node-server':
         specifier: ^1.13.0
         version: 1.19.17(hono@4.13.7)
+      '@idle/agent':
+        specifier: workspace:*
+        version: link:../../packages/agent
+      '@idle/chain':
+        specifier: workspace:*
+        version: link:../../packages/chain
       '@idle/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -68,12 +74,18 @@ importers:
       '@idle/obligations':
         specifier: workspace:*
         version: link:../../packages/obligations
+      '@idle/wallet':
+        specifier: workspace:*
+        version: link:../../packages/wallet
       '@idle/yields':
         specifier: workspace:*
         version: link:../../packages/yields
       hono:
         specifier: ^4.6.0
         version: 4.13.7
+      viem:
+        specifier: ^2.21.0
+        version: 2.56.3(typescript@5.9.3)
 
   apps/web:
     dependencies:
