@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Proposal, Verdict } from "@idle/core";
 import {
-  IllegalTransitionError, LEGAL_TRANSITIONS, createRun, getRun, listRuns,
+  IllegalTransitionError, LEGAL_TRANSITIONS, attachProposal, createRun, getRun, listRuns,
   openLedger, transitionRun, type Ledger,
 } from "../src/index.js";
 
@@ -113,5 +113,30 @@ describe("listRuns", () => {
     transitionRun(l, "r2", "AWAITING_APPROVAL");
     expect(listRuns(l, "AWAITING_APPROVAL").map((r) => r.id)).toEqual(["r2"]);
     expect(listRuns(l)).toHaveLength(2);
+  });
+});
+
+describe("runs without a proposal yet", () => {
+  it("can start a run before a proposal exists", () => {
+    const r = createRun(l, "r1", null);
+    expect(r.status).toBe("PROPOSED");
+    expect(r.proposal).toBeNull();
+  });
+
+  it("can fail a run that never got a proposal, keeping the audit trail", () => {
+    createRun(l, "r1", null);
+    expect(transitionRun(l, "r1", "FAILED").status).toBe("FAILED");
+  });
+
+  it("attaches a proposal once it exists", () => {
+    createRun(l, "r1", null);
+    attachProposal(l, "r1", PROPOSAL);
+    expect(getRun(l, "r1")?.proposal?.hold).toBe(40_000_000n);
+  });
+
+  it("refuses to attach a proposal outside PROPOSED", () => {
+    createRun(l, "r1", PROPOSAL);
+    transitionRun(l, "r1", "VALIDATED");
+    expect(() => attachProposal(l, "r1", PROPOSAL)).toThrow(/PROPOSED/);
   });
 });
