@@ -40,6 +40,8 @@ video — which is narrated by a team member and is not AI-generated.
 | `packages/core/**` | `AI` | Domain types and money helpers; reviewed by the team |
 | `packages/obligations/**` | `AI` | FX table and buffer math; rates and rounding direction reviewed by the team |
 | `packages/kernel/**` | `AI` | Invariants K1-K8 and validate(); invariant semantics and the veto/escalate split are team decisions (see DECISIONS.md D-006) |
+| `packages/yields/**` | `AI` | Registry, standardized query, normalization and client; registry contents and allowlist policy are team decisions (D-010) |
+| `specs/spikes/` | `AI+H` | Spike probes written and run by AI; the GO/no-go call and its consequences are the team's |
 
 *(Rows are appended as files land. See git history for the ordering.)*
 

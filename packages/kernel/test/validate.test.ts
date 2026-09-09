@@ -21,7 +21,7 @@ function state(over: Partial<TreasuryState> = {}): TreasuryState {
 function policy(over: Partial<Policy> = {}): Policy {
   return {
     bufferHorizonDays: 30, bufferMultiplierBps: 11_500,
-    venueAllowlist: ["m1", "m2"], maxVenueConcentrationBps: 5_000,
+    protocolAllowlist: ["aave-v3"], maxVenueConcentrationBps: 5_000,
     maxRunMovementUsdc: 1_000_000_000n, minVenueLiquidityUsd: 1_000_000, ...over,
   };
 }
@@ -58,7 +58,6 @@ describe("validate", () => {
       const ids = v.breaches.map((b) => b.invariant);
       expect(ids).toContain("K1");
       expect(ids).toContain("K3");
-      expect(ids).toContain("K4");
     }
   });
 

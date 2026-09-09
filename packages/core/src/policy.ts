@@ -7,8 +7,14 @@ export type Policy = {
   bufferHorizonDays: number;
   /** Safety factor on the buffer, in basis points. 11500 = 1.15x. */
   bufferMultiplierBps: number;
-  /** Market ids the agent may allocate to. */
-  venueAllowlist: string[];
+  /**
+   * Protocol identifiers the agent may allocate into, matching
+   * `Market.protocol` (e.g. "aave-v3"). Protocol-level rather than
+   * market-level because that is how an operator actually reasons about
+   * counterparty risk — and it does not need re-editing every time an
+   * allowlisted protocol lists a new asset.
+   */
+  protocolAllowlist: string[];
   /** Max share of post-run parked capital in any one market. 5000 = 50%. */
   maxVenueConcentrationBps: number;
   /** Ceiling on total USDC moved in a single run. */

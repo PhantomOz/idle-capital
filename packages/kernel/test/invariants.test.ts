@@ -27,7 +27,7 @@ function policy(over: Partial<Policy> = {}): Policy {
   return {
     bufferHorizonDays: 30,
     bufferMultiplierBps: 11_500,
-    venueAllowlist: ["m1", "m2"],
+    protocolAllowlist: ["aave-v3"],
     maxVenueConcentrationBps: 5_000,
     maxRunMovementUsdc: 1_000_000_000n,
     minVenueLiquidityUsd: 1_000_000,
@@ -163,14 +163,32 @@ describe("k3MarketExists", () => {
 });
 
 describe("k4Allowlist", () => {
-  it("passes when every target is allowlisted", () => {
+  it("passes when the target market's protocol is allowlisted", () => {
     const p: Proposal = { hold: 0n, allocations: [{ marketId: "m2", amountUsdc: 1n }], rationale: "x" };
-    expect(k4Allowlist(p, policy())).toBeNull();
+    expect(k4Allowlist(p, state(), policy())).toBeNull();
   });
 
-  it("rejects a real market that the operator has not permitted", () => {
-    const p: Proposal = { hold: 0n, allocations: [{ marketId: "m3", amountUsdc: 1n }], rationale: "x" };
-    expect(k4Allowlist(p, policy())?.invariant).toBe("K4");
+  it("rejects a market whose protocol is not allowlisted", () => {
+    const s = state({ markets: [market("m1"), market("m2", { protocol: "rari-fuse" })] });
+    const p: Proposal = { hold: 0n, allocations: [{ marketId: "m2", amountUsdc: 1n }], rationale: "x" };
+    const b = k4Allowlist(p, s, policy());
+    expect(b?.invariant).toBe("K4");
+    expect(b?.observed).toContain("rari-fuse");
+  });
+
+  it("allows every market of an allowlisted protocol without enumerating them", () => {
+    const s = state({ markets: [market("usdc"), market("dai"), market("weth")] });
+    const p: Proposal = {
+      hold: 0n,
+      allocations: [{ marketId: "usdc", amountUsdc: 1n }, { marketId: "dai", amountUsdc: 1n }],
+      rationale: "x",
+    };
+    expect(k4Allowlist(p, s, policy())).toBeNull();
+  });
+
+  it("defers to K3 for a market that is not in the live set at all", () => {
+    const p: Proposal = { hold: 0n, allocations: [{ marketId: "ghost", amountUsdc: 1n }], rationale: "x" };
+    expect(k4Allowlist(p, state(), policy())).toBeNull();
   });
 });
 
