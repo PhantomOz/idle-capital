@@ -125,20 +125,28 @@ export function k3MarketExists(p: Proposal, s: TreasuryState): Breach | null {
 }
 
 /**
- * K4 — venue allowlist. VETO.
+ * K4 — protocol allowlist. VETO.
  *
- * A market can be real, liquid and high-yielding and still be one the
- * operator has not agreed to hold funds in.
+ * A market can be real, liquid and high-yielding and still sit on a protocol
+ * the operator has not agreed to hold funds in. Checked at protocol level:
+ * that is the unit an operator reasons in, and it does not need re-editing
+ * when an allowlisted protocol lists a new asset.
+ *
+ * A market absent from the live set is K3's to report, not K4's — flagging it
+ * twice would tell the reader there are two problems when there is one.
  */
-export function k4Allowlist(p: Proposal, pol: Policy): Breach | null {
-  const allowed = new Set(pol.venueAllowlist);
+export function k4Allowlist(p: Proposal, s: TreasuryState, pol: Policy): Breach | null {
+  const byId = new Map(s.markets.map((m) => [m.id, m]));
+  const allowed = new Set(pol.protocolAllowlist);
   for (const a of p.allocations) {
-    if (!allowed.has(a.marketId)) {
+    const m = byId.get(a.marketId);
+    if (m === undefined) continue; // K3 owns the missing-market case
+    if (!allowed.has(m.protocol)) {
       return breach(
         "K4",
-        `market ${a.marketId} is not on the venue allowlist`,
-        a.marketId,
-        pol.venueAllowlist.join(", "),
+        `market ${a.marketId} sits on protocol ${m.protocol}, which is not allowlisted`,
+        m.protocol,
+        pol.protocolAllowlist.join(", "),
       );
     }
   }
