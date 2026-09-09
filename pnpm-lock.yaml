@@ -24,6 +24,30 @@ importers:
         specifier: ^2.1.0
         version: 2.1.9(@types/node@22.20.1)
 
+  apps/api:
+    dependencies:
+      '@hono/node-server':
+        specifier: ^1.13.0
+        version: 1.19.17(hono@4.13.7)
+      '@idle/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@idle/kernel':
+        specifier: workspace:*
+        version: link:../../packages/kernel
+      '@idle/ledger':
+        specifier: workspace:*
+        version: link:../../packages/ledger
+      '@idle/obligations':
+        specifier: workspace:*
+        version: link:../../packages/obligations
+      '@idle/yields':
+        specifier: workspace:*
+        version: link:../../packages/yields
+      hono:
+        specifier: ^4.6.0
+        version: 4.13.7
+
   packages/core: {}
 
   packages/kernel:
@@ -192,6 +216,12 @@ packages:
     engines: {node: '>=12'}
     cpu: [x64]
     os: [win32]
+
+  '@hono/node-server@1.19.17':
+    resolution: {integrity: sha512-dSneS5qhiauZWGDCeK4o695Xd9nUNjviSZCMQrj10eetr8Uln1ucn6bbphOM6UynAMMtNIzZNSpL9vnASJwrPQ==}
+    engines: {node: '>=18.14.1'}
+    peerDependencies:
+      hono: ^4
 
   '@jridgewell/sourcemap-codec@1.6.0':
     resolution: {integrity: sha512-T7jf+5zgsZHwNJ4lvQ7/aezbyk0nNX+zJVWpmHA7VYsEx7a7qr5Rg5IbtJFqkgze5Y2sruq1RUY8Q837Od7iFw==}
@@ -418,6 +448,10 @@ packages:
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
     os: [darwin]
 
+  hono@4.13.7:
+    resolution: {integrity: sha512-c8/gF9ac8Y78/agExVocyLevgR+JlpNB444Py0FSX8pJoPdYUfUzRcXtYEYGwt6l19qIlVZPN5Mfsw9jFShmQQ==}
+    engines: {node: '>=16.9.0'}
+
   loupe@3.2.1:
     resolution: {integrity: sha512-CdzqowRJCeLU72bHvWqwRBBlLcMEtIvGrlvef74kMnV2AolS9Y8xUv1I0U/MNAWMhBlKIoyuEgoJ0t/bbwHbLQ==}
 
@@ -631,6 +665,10 @@ snapshots:
   '@esbuild/win32-x64@0.21.5':
     optional: true
 
+  '@hono/node-server@1.19.17(hono@4.13.7)':
+    dependencies:
+      hono: 4.13.7
+
   '@jridgewell/sourcemap-codec@1.6.0': {}
 
   '@napi-rs/lzma-linux-x64-gnu@1.5.1':
@@ -821,6 +859,8 @@ snapshots:
 
   fsevents@2.3.3:
     optional: true
+
+  hono@4.13.7: {}
 
   loupe@3.2.1: {}
 
