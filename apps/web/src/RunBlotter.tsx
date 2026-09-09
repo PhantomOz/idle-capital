@@ -43,7 +43,9 @@ export function RunBlotter({ run, onApprove, onReject, busy }: {
       </div>
 
       {p === null
-        ? <p className="rationale">This run stopped before the agent proposed anything.</p>
+        ? <p className="rationale">
+            {run.error ?? "This run stopped before the agent proposed anything."}
+          </p>
         : <p className="rationale">{p.rationale}</p>}
 
       {amounts.length > 0 && (

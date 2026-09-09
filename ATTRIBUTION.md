@@ -45,6 +45,9 @@ video — which is narrated by a team member and is not AI-generated.
 | `packages/ledger/**` | `AI` | Schema, state machine, intent ledger and recovery; the never-resubmit rule is a team decision (D-003) |
 | `apps/api/**` | `AI` | Ports, orchestrator, HTTP surface; policy defaults and the allowlist are team decisions (D-010) |
 | `apps/web/**` | `AI` | Ledger-sheet UI, formatters and components; visual direction and the D-013 restructure reviewed against the running page |
+| `packages/agent/**` | `AI` | Prompt, forced-tool schema and defensive parsing; the prompt's framing is a team decision |
+| `packages/chain/**` | `AI` | Arc client; the native-USDC finding came from probing the live chain |
+| `packages/wallet/**` | `AI` | Privy client, treasury and executor; the two-ceiling design is a team decision (D-015) |
 
 *(Rows are appended as files land. See git history for the ordering.)*
 

@@ -18,6 +18,10 @@
     "@idle/obligations": "workspace:*",
     "@idle/yields": "workspace:*",
     "hono": "^4.6.0",
-    "@hono/node-server": "^1.13.0"
+    "@hono/node-server": "^1.13.0",
+    "@idle/agent": "workspace:*",
+    "@idle/chain": "workspace:*",
+    "@idle/wallet": "workspace:*",
+    "viem": "^2.21.0"
   }
 }

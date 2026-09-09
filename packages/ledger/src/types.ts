@@ -19,6 +19,8 @@ export type Run = {
   status: RunStatus;
   proposal: Proposal | null;
   verdict: Verdict | null;
+  /** Why the run failed, when it failed before the kernel could rule. */
+  error: string | null;
   createdAt: string;
   updatedAt: string;
 };
