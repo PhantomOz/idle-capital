@@ -11,7 +11,12 @@ const READY =
   process.env.ARC_RPC_URL;
 const live = READY ? describe : describe.skip;
 
-live("Privy-signed Arc settlement (integration)", () => {
+/**
+ * Built inside each test, not at describe scope. `describe.skip` still runs
+ * its callback to collect, so constructing a client from absent env vars at
+ * that level fails the whole file for anyone without credentials.
+ */
+function wire() {
   const arc = createArcClient(process.env.ARC_RPC_URL!);
   const address = process.env.PRIVY_WALLET_ADDRESS! as Address;
   const privy = createPrivyClient({
@@ -19,24 +24,25 @@ live("Privy-signed Arc settlement (integration)", () => {
     appSecret: process.env.PRIVY_APP_SECRET!,
     walletId: process.env.PRIVY_WALLET_ID!,
   });
-  const executor = createPrivyArcExecutor({
-    arc, privy, address, settlementAddress: address,
-  });
+  return { arc, address,
+    executor: createPrivyArcExecutor({ arc, privy, address, settlementAddress: address }) };
+}
 
+live("Privy-signed Arc settlement (integration)", () => {
   it("settles a real intent on Arc without ever holding a private key", async () => {
+    const { arc, address, executor } = wire();
     const before = await arc.getBalanceUsdcMinor(address);
     expect(before).toBeGreaterThan(0n);
 
     const txRef = await executor.submit({ amountUsdc: 100_000n }); // 0.1 USDC
     expect(txRef).toMatch(/^0x[0-9a-f]{64}$/i);
-
-    const status = await executor.checkStatus(txRef);
-    expect(status).toBe("confirmed");
+    expect(await executor.checkStatus(txRef)).toBe("confirmed");
 
     console.log(`live: settled 0.1 USDC on Arc, tx ${txRef}`);
   }, 180_000);
 
   it("reads the treasury balance from the chain", async () => {
+    const { arc, address } = wire();
     const balance = await arc.getBalanceUsdcMinor(address);
     console.log(`live: treasury holds ${Number(balance) / 1e6} USDC on Arc`);
     expect(balance).toBeGreaterThanOrEqual(0n);
