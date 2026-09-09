@@ -57,11 +57,30 @@ function hydrate(row: RunRow): Run {
   };
 }
 
-export function createRun(l: Ledger, id: string, proposal: Proposal): Run {
+export function createRun(l: Ledger, id: string, proposal: Proposal | null): Run {
   const now = new Date().toISOString();
   l.raw.prepare(
     "INSERT INTO runs (id,status,proposal,verdict,created_at,updated_at) VALUES (?,?,?,?,?,?)",
-  ).run(id, "PROPOSED", toJson(proposal), null, now, now);
+  ).run(id, "PROPOSED", proposal === null ? null : toJson(proposal), null, now, now);
+  return getRun(l, id)!;
+}
+
+/**
+ * Attach the proposal once the agent has produced one.
+ *
+ * A run is created before the proposal exists so that a failure earlier in
+ * the pipeline — a Graph quorum miss, say — still leaves a record. Only legal
+ * while the run is still PROPOSED; a validated run's proposal is what was
+ * validated, and must not move under it.
+ */
+export function attachProposal(l: Ledger, id: string, proposal: Proposal): Run {
+  const current = getRun(l, id);
+  if (current === null) throw new Error(`Run ${id} not found`);
+  if (current.status !== "PROPOSED") {
+    throw new Error(`Run ${id}: cannot attach a proposal in ${current.status}; only PROPOSED`);
+  }
+  l.raw.prepare("UPDATE runs SET proposal=?, updated_at=? WHERE id=?")
+    .run(toJson(proposal), new Date().toISOString(), id);
   return getRun(l, id)!;
 }
 

@@ -18,7 +18,7 @@ function market(id: string, over: Partial<Market> = {}): Market {
 
 function state(over: Partial<TreasuryState> = {}): TreasuryState {
   return {
-    availableUsdc: 100_000_000n, positions: [], markets: [market("m1"), market("m2")],
+    totalUsdc: 100_000_000n, positions: [], markets: [market("m1"), market("m2")],
     bufferRequiredUsdc: 30_000_000n, asOf: ASOF, ...over,
   };
 }
@@ -92,13 +92,23 @@ describe("k8WellFormed", () => {
 });
 
 describe("k2Conservation", () => {
-  it("passes when hold plus allocations equals the available balance exactly", () => {
+  it("passes when hold plus targets equals the whole treasury", () => {
     const p: Proposal = {
       hold: 40_000_000n,
       allocations: [{ marketId: "m1", amountUsdc: 60_000_000n }],
       rationale: "x",
     };
     expect(k2Conservation(p, state())).toBeNull();
+  });
+
+  it("counts capital already parked, because targets are absolute", () => {
+    const s = state({ positions: [{ marketId: "m1", amountUsdc: 30_000_000n }] });
+    const p: Proposal = {
+      hold: 40_000_000n,
+      allocations: [{ marketId: "m1", amountUsdc: 60_000_000n }],
+      rationale: "x",
+    };
+    expect(k2Conservation(p, s)).toBeNull();
   });
 
   it("rejects a proposal that conjures USDC from nowhere", () => {
@@ -219,18 +229,29 @@ describe("k5Concentration", () => {
     expect(b?.observed).toContain("m1");
   });
 
-  it("counts EXISTING positions, not just this run's allocations", () => {
-    // 40m already in m1, adding 30m of a 60m run -> 70m of 100m parked = 70%
+  it("reads the target directly, since targets already describe the end state", () => {
     const p: Proposal = {
       hold: 0n,
       allocations: [
-        { marketId: "m1", amountUsdc: 30_000_000n },
+        { marketId: "m1", amountUsdc: 70_000_000n },
         { marketId: "m2", amountUsdc: 30_000_000n },
       ],
       rationale: "x",
     };
-    const s = state({ positions: [{ marketId: "m1", amountUsdc: 40_000_000n }] });
-    expect(k5Concentration(p, s, policy())?.invariant).toBe("K5");
+    expect(k5Concentration(p, state(), policy())?.invariant).toBe("K5");
+  });
+
+  it("is not fooled by capital already parked, because it never adds it twice", () => {
+    const s = state({ positions: [{ marketId: "m1", amountUsdc: 25_000_000n }] });
+    const p: Proposal = {
+      hold: 0n,
+      allocations: [
+        { marketId: "m1", amountUsdc: 50_000_000n },
+        { marketId: "m2", amountUsdc: 50_000_000n },
+      ],
+      rationale: "x",
+    };
+    expect(k5Concentration(p, s, policy())).toBeNull();
   });
 
   it("passes when nothing is parked at all", () => {
@@ -240,14 +261,30 @@ describe("k5Concentration", () => {
 });
 
 describe("k6RunMovement", () => {
-  it("passes at exactly the cap", () => {
-    const p: Proposal = { hold: 0n, allocations: [{ marketId: "m1", amountUsdc: 1_000_000_000n }], rationale: "x" };
-    expect(k6RunMovement(p, policy())).toBeNull();
+  it("measures churn, not the size of the target", () => {
+    const s = state({ positions: [{ marketId: "m1", amountUsdc: 100_000_000n }] });
+    const p: Proposal = {
+      hold: 0n,
+      allocations: [{ marketId: "m1", amountUsdc: 100_000_000n }],
+      rationale: "x",
+    };
+    expect(k6RunMovement(p, s, policy({ maxRunMovementUsdc: 1n }))).toBeNull();
   });
 
-  it("escalates one unit over the cap", () => {
-    const p: Proposal = { hold: 0n, allocations: [{ marketId: "m1", amountUsdc: 1_000_000_001n }], rationale: "x" };
-    expect(k6RunMovement(p, policy())?.invariant).toBe("K6");
+  it("counts a deposit as movement", () => {
+    const p: Proposal = { hold: 0n, allocations: [{ marketId: "m1", amountUsdc: 100_000_000n }], rationale: "x" };
+    expect(k6RunMovement(p, state(), policy({ maxRunMovementUsdc: 1n }))?.invariant).toBe("K6");
+  });
+
+  it("counts a withdrawal as movement too", () => {
+    const s = state({ positions: [{ marketId: "m1", amountUsdc: 100_000_000n }] });
+    const p: Proposal = { hold: 100_000_000n, allocations: [], rationale: "x" };
+    expect(k6RunMovement(p, s, policy({ maxRunMovementUsdc: 1n }))?.invariant).toBe("K6");
+  });
+
+  it("passes at exactly the cap", () => {
+    const p: Proposal = { hold: 0n, allocations: [{ marketId: "m1", amountUsdc: 100_000_000n }], rationale: "x" };
+    expect(k6RunMovement(p, state(), policy({ maxRunMovementUsdc: 100_000_000n }))).toBeNull();
   });
 });
 

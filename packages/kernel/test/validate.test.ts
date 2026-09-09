@@ -14,7 +14,7 @@ function market(id: string, over: Partial<Market> = {}): Market {
 }
 function state(over: Partial<TreasuryState> = {}): TreasuryState {
   return {
-    availableUsdc: 100_000_000n, positions: [], markets: [market("m1"), market("m2")],
+    totalUsdc: 100_000_000n, positions: [], markets: [market("m1"), market("m2")],
     bufferRequiredUsdc: 30_000_000n, asOf: ASOF, ...over,
   };
 }
