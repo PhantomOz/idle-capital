@@ -9,14 +9,22 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit -p packages/core && tsc --noEmit -p packages/obligations && tsc --noEmit -p packages/kernel && tsc --noEmit -p packages/yields && tsc --noEmit -p packages/ledger && tsc --noEmit -p apps/api",
+    "typecheck": "tsc --noEmit -p packages/core && tsc --noEmit -p packages/obligations && tsc --noEmit -p packages/kernel && tsc --noEmit -p packages/yields && tsc --noEmit -p packages/ledger && tsc --noEmit -p apps/api && tsc --noEmit -p apps/web",
     "test:live": "vitest run packages/yields/test/live.integration.test.ts",
-    "dev:api": "tsx apps/api/src/server.ts"
+    "dev:api": "tsx apps/api/src/server.ts",
+    "dev:web": "pnpm --filter @idle/web dev"
   },
   "devDependencies": {
+    "@testing-library/react": "^16.3.3",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^22.7.0",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "@vitejs/plugin-react": "^4.7.0",
     "better-sqlite3": "^13.0.3",
+    "jsdom": "^25.0.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "tsx": "^4.23.13",
     "typescript": "^5.6.0",
     "vitest": "^2.1.0"

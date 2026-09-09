@@ -217,3 +217,40 @@ Three consequences:
 orchestrator had to turn a validated proposal into actual moves and there was
 no way to express "take it out". Worth recording as evidence that building the
 execution path early surfaces design errors that reading the spec did not.
+
+---
+
+## D-012 — Vite + React for the frontend, not Next.js
+
+**Date:** 2026-09-09 · **Status:** Adopted · **Amends:** spec §3
+
+The spec named Next.js. We shipped Vite + React.
+
+**Why:** there is nothing for Next.js to do here. The API is a separate
+service, so there is no server rendering, no data fetching in the framework,
+and no routing beyond a single page. What Next.js would add on a four-day
+build is a second build system to debug. Vite builds the whole app in 500ms
+and the deliverable a judge sees is identical.
+
+---
+
+## D-013 — The refusal is shown once, not ninety times
+
+**Date:** 2026-09-09 · **Status:** Adopted
+
+The first build of the markets table struck through every refused market in
+place. Against live data that rendered as fourteen consecutive identical
+rari-fuse rows and pushed every usable market below the fold — 95 of 102
+markets are refused, so the table was almost entirely noise.
+
+It now leads with the single best rate on offer, struck through with the
+reason, then lists only the markets the treasury can actually use, then counts
+the rest in a footnote.
+
+**Why this is a design decision and not a tweak:** the point of the page is
+that chasing yield blindly is dangerous. That argument is made by the top of
+the list. Repeating it down the page does not strengthen it — it buries the
+answer to the operator's actual question, which is *where can my money go?*
+
+Found by looking at the running page against live data, not by reading the
+component.
