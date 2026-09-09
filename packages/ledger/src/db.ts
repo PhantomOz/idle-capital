@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS runs (
   status      TEXT NOT NULL,
   proposal    TEXT,
   verdict     TEXT,
+  error       TEXT,
   created_at  TEXT NOT NULL,
   updated_at  TEXT NOT NULL
 );
@@ -60,7 +61,12 @@ export function openLedger(path = ".idle/ledger.db"): Ledger {
 
   const ledger: Ledger = {
     raw,
-    migrate() { raw.exec(SCHEMA); },
+    migrate() {
+      raw.exec(SCHEMA);
+      // Older ledgers predate the error column. Adding it is idempotent:
+      // SQLite has no ADD COLUMN IF NOT EXISTS, so a duplicate is caught.
+      try { raw.exec("ALTER TABLE runs ADD COLUMN error TEXT"); } catch { /* already there */ }
+    },
     close() { raw.close(); },
   };
   ledger.migrate();
