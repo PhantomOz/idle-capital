@@ -9,13 +9,15 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit -p packages/core && tsc --noEmit -p packages/obligations && tsc --noEmit -p packages/kernel && tsc --noEmit -p packages/yields && tsc --noEmit -p packages/ledger",
-    "test:live": "vitest run packages/yields/test/live.integration.test.ts"
+    "typecheck": "tsc --noEmit -p packages/core && tsc --noEmit -p packages/obligations && tsc --noEmit -p packages/kernel && tsc --noEmit -p packages/yields && tsc --noEmit -p packages/ledger && tsc --noEmit -p apps/api",
+    "test:live": "vitest run packages/yields/test/live.integration.test.ts",
+    "dev:api": "tsx apps/api/src/server.ts"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^22.7.0",
     "better-sqlite3": "^13.0.3",
+    "tsx": "^4.23.13",
     "typescript": "^5.6.0",
     "vitest": "^2.1.0"
   }

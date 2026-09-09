@@ -1,5 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
+import { existsSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { openLedger } from "../src/index.js";
+
+const SCRATCH = join(tmpdir(), `idle-ledger-test-${Date.now()}`);
+afterAll(() => { rmSync(SCRATCH, { recursive: true, force: true }); });
 
 describe("openLedger", () => {
   it("creates the runs and intents tables", () => {
@@ -57,5 +63,21 @@ describe("openLedger", () => {
     const a = openLedger(":memory:");
     expect(() => a.migrate()).not.toThrow();
     a.close();
+  });
+});
+
+describe("first boot on a fresh clone", () => {
+  it("creates the parent directory rather than refusing to start", () => {
+    const path = join(SCRATCH, "nested", "deeper", "ledger.db");
+    expect(existsSync(path)).toBe(false);
+    const l = openLedger(path);
+    expect(existsSync(path)).toBe(true);
+    l.close();
+  });
+
+  it("still accepts :memory: without touching the filesystem", () => {
+    const l = openLedger(":memory:");
+    expect(() => l.migrate()).not.toThrow();
+    l.close();
   });
 });

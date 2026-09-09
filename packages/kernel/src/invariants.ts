@@ -64,19 +64,20 @@ export function k8WellFormed(proposal: unknown): Breach | null {
 /**
  * K2 — conservation. VETO.
  *
- * Every available unit is either held or allocated. A proposal that does not
- * balance is either conjuring USDC or silently stranding it, and neither is
- * something a human should be asked to approve.
+ * Every unit of the treasury is either held liquid or targeted at a venue.
+ * Checked against the WHOLE treasury because allocations are absolute
+ * targets: a rebalance that moves nothing still has to account for
+ * everything.
  */
 export function k2Conservation(p: Proposal, s: TreasuryState): Breach | null {
-  const allocated = p.allocations.reduce((sum, a) => sum + a.amountUsdc, 0n);
-  const total = p.hold + allocated;
-  if (total !== s.availableUsdc) {
+  const targeted = p.allocations.reduce((sum, a) => sum + a.amountUsdc, 0n);
+  const total = p.hold + targeted;
+  if (total !== s.totalUsdc) {
     return breach(
       "K2",
-      "hold plus allocations does not equal the available balance",
-      `${total} (hold ${p.hold} + allocated ${allocated})`,
-      s.availableUsdc.toString(),
+      "hold plus targets does not equal the treasury total",
+      `${total} (hold ${p.hold} + targeted ${targeted})`,
+      s.totalUsdc.toString(),
     );
   }
   return null;
@@ -156,30 +157,22 @@ export function k4Allowlist(p: Proposal, s: TreasuryState, pol: Policy): Breach 
 /**
  * K5 — venue concentration. ESCALATE.
  *
- * Measured on the position AFTER the run, including capital already parked.
- * Measuring only this run's movement would let an agent reach any
- * concentration it liked by splitting the approach across several runs.
+ * Reads the targets directly. They already describe the end state, so there
+ * is nothing to add — and the split-across-runs evasion that an incremental
+ * shape would allow is impossible here by construction rather than by check.
  */
-export function k5Concentration(p: Proposal, s: TreasuryState, pol: Policy): Breach | null {
-  const after = new Map<string, bigint>();
-  for (const pos of s.positions) {
-    after.set(pos.marketId, (after.get(pos.marketId) ?? 0n) + pos.amountUsdc);
-  }
-  for (const a of p.allocations) {
-    after.set(a.marketId, (after.get(a.marketId) ?? 0n) + a.amountUsdc);
-  }
-
+export function k5Concentration(p: Proposal, _s: TreasuryState, pol: Policy): Breach | null {
   let totalParked = 0n;
-  for (const amount of after.values()) totalParked += amount;
+  for (const a of p.allocations) totalParked += a.amountUsdc;
   if (totalParked === 0n) return null;
 
   const cap = applyBpsCeil(totalParked, pol.maxVenueConcentrationBps);
-  for (const [marketId, amount] of after) {
-    if (amount > cap) {
+  for (const a of p.allocations) {
+    if (a.amountUsdc > cap) {
       return breach(
         "K5",
-        `market ${marketId} would hold more than the permitted share of parked capital`,
-        `${marketId} at ${amount} of ${totalParked}`,
+        `market ${a.marketId} would hold more than the permitted share of parked capital`,
+        `${a.marketId} at ${a.amountUsdc} of ${totalParked}`,
         `${cap} (${pol.maxVenueConcentrationBps}bps)`,
       );
     }
@@ -190,17 +183,33 @@ export function k5Concentration(p: Proposal, s: TreasuryState, pol: Policy): Bre
 /**
  * K6 — per-run movement ceiling. ESCALATE.
  *
+ * Measures CHURN — the sum of absolute differences between target and
+ * current — not the size of the targets. Under target semantics a proposal
+ * that changes nothing still names the full position, and charging that
+ * against the movement cap would block every no-op rebalance.
+ *
  * Bounds the blast radius of any single bad decision, whoever made it.
  */
-export function k6RunMovement(p: Proposal, pol: Policy): Breach | null {
-  const moved = p.allocations.reduce((sum, a) => sum + a.amountUsdc, 0n);
+export function k6RunMovement(p: Proposal, s: TreasuryState, pol: Policy): Breach | null {
+  const current = new Map<string, bigint>();
+  for (const pos of s.positions) {
+    current.set(pos.marketId, (current.get(pos.marketId) ?? 0n) + pos.amountUsdc);
+  }
+  let moved = 0n;
+  const seen = new Set<string>();
+  for (const a of p.allocations) {
+    seen.add(a.marketId);
+    const now = current.get(a.marketId) ?? 0n;
+    moved += a.amountUsdc > now ? a.amountUsdc - now : now - a.amountUsdc;
+  }
+  // Venues the proposal drops entirely are full withdrawals.
+  for (const [marketId, amount] of current) {
+    if (!seen.has(marketId)) moved += amount;
+  }
+
   if (moved > pol.maxRunMovementUsdc) {
-    return breach(
-      "K6",
-      "this run moves more than the per-run ceiling",
-      moved.toString(),
-      pol.maxRunMovementUsdc.toString(),
-    );
+    return breach("K6", "this run moves more than the per-run ceiling",
+                  moved.toString(), pol.maxRunMovementUsdc.toString());
   }
   return null;
 }

@@ -39,7 +39,7 @@ export function validate(proposal: unknown, state: TreasuryState, policy: Policy
 
     const escalations = present([
       k5Concentration(p, state, policy),
-      k6RunMovement(p, policy),
+      k6RunMovement(p, state, policy),
       k7Liquidity(p, state, policy),
     ]);
     if (escalations.length > 0) return { kind: "escalated", breaches: escalations };
