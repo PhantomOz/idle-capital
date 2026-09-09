@@ -701,10 +701,15 @@ const OBLIGATIONS: Obligation[] = [
 
 function deps(over: Partial<OrchestratorDeps> = {}): OrchestratorDeps {
   const l = over.ledger ?? openLedger(":memory:");
+  // Two venues, not one: a single-venue target is 100% concentrated and K5
+  // escalates it, which is correct but makes a poor happy-path fixture.
   const proposal: Proposal = {
     hold: 90_000_000n,
-    allocations: [{ marketId: "m1", amountUsdc: 10_000_000n }],
-    rationale: "NGN payroll on the 20th; park the surplus in Aave.",
+    allocations: [
+      { marketId: "m1", amountUsdc: 5_000_000n },
+      { marketId: "m2", amountUsdc: 5_000_000n },
+    ],
+    rationale: "NGN payroll on the 20th; park the surplus across Aave and Compound.",
   };
   return {
     ledger: l,
@@ -762,10 +767,10 @@ describe("startRun", () => {
 
   it("ESCALATES a concentrated proposal instead of executing it", async () => {
     const concentrated: Proposal = {
-      hold: 0n,
+      hold: 20_000_000n,
       allocations: [
-        { marketId: "m1", amountUsdc: 90_000_000n },
-        { marketId: "m2", amountUsdc: 10_000_000n },
+        { marketId: "m1", amountUsdc: 72_000_000n },
+        { marketId: "m2", amountUsdc: 8_000_000n },
       ],
       rationale: "all in on m1",
     };
@@ -807,7 +812,10 @@ describe("startRun", () => {
     const d2 = deps({
       treasury: { snapshot: vi.fn(async () => ({
         totalUsdc: 100_000_000n,
-        positions: [{ marketId: "m1", amountUsdc: 10_000_000n }],
+        positions: [
+          { marketId: "m1", amountUsdc: 5_000_000n },
+          { marketId: "m2", amountUsdc: 5_000_000n },
+        ],
       })) },
     });
     const run = await startRun(d2, "r1");
@@ -819,10 +827,10 @@ describe("startRun", () => {
 describe("approveRun / rejectRun", () => {
   async function escalated(): Promise<OrchestratorDeps> {
     const d2 = deps({ proposer: { propose: vi.fn(async () => ({
-      hold: 0n,
+      hold: 20_000_000n,
       allocations: [
-        { marketId: "m1", amountUsdc: 90_000_000n },
-        { marketId: "m2", amountUsdc: 10_000_000n },
+        { marketId: "m1", amountUsdc: 72_000_000n },
+        { marketId: "m2", amountUsdc: 8_000_000n },
       ],
       rationale: "concentrated",
     })) } });
@@ -863,8 +871,8 @@ import type { Obligation, Policy } from "@idle/core";
 import { validate } from "@idle/kernel";
 import { bufferRequirementUsdc, scheduleByCurrency } from "@idle/obligations";
 import {
-  attachProposal, createRun, getRun, listIntents, markFailed, markSubmitted,
-  materialiseIntents, transitionRun,
+  attachProposal, createRun, getRun, listIntents, markConfirmed, markFailed,
+  markSubmitted, materialiseIntents, transitionRun,
   type ExecutionPort, type Ledger, type Run,
 } from "@idle/ledger";
 import { deriveIntents } from "./derive.js";
@@ -993,7 +1001,6 @@ async function execute(deps: OrchestratorDeps, runId: string): Promise<Run> {
     try {
       const status = await deps.execution.checkStatus(intent.txRef);
       if (status === "confirmed") {
-        const { markConfirmed } = await import("@idle/ledger");
         markConfirmed(ledger, intent.id);
       } else if (status === "failed") {
         markFailed(ledger, intent.id, "transaction failed");
@@ -1113,12 +1120,10 @@ describe("GET /markets", () => {
   });
 
   it("reports 503 when the data source is down, rather than serving nothing quietly", async () => {
-    const broken = createApp(deps());
-    (d.markets.fetch as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("quorum"));
-    const res = await createApp({ ...d, markets: { fetch: async () => { throw new Error("quorum"); } } })
-      .request("/markets");
+    const down = createApp({ ...d, markets: { fetch: async () => { throw new Error("quorum not met"); } } });
+    const res = await down.request("/markets");
     expect(res.status).toBe(503);
-    expect(broken).toBeDefined();
+    expect((await res.json()).error).toContain("quorum");
   });
 });
 
@@ -1158,10 +1163,10 @@ describe("GET /runs and /runs/:id", () => {
 describe("approval endpoints", () => {
   it("approves an escalated run", async () => {
     const d2 = deps({
-      hold: 0n,
+      hold: 20_000_000n,
       allocations: [
-        { marketId: "m1", amountUsdc: 90_000_000n },
-        { marketId: "m2", amountUsdc: 10_000_000n },
+        { marketId: "m1", amountUsdc: 72_000_000n },
+        { marketId: "m2", amountUsdc: 8_000_000n },
       ],
       rationale: "concentrated",
     });
@@ -1176,10 +1181,10 @@ describe("approval endpoints", () => {
 
   it("rejects an escalated run without moving money", async () => {
     const d2 = deps({
-      hold: 0n,
+      hold: 20_000_000n,
       allocations: [
-        { marketId: "m1", amountUsdc: 90_000_000n },
-        { marketId: "m2", amountUsdc: 10_000_000n },
+        { marketId: "m1", amountUsdc: 72_000_000n },
+        { marketId: "m2", amountUsdc: 8_000_000n },
       ],
       rationale: "concentrated",
     });
@@ -1337,7 +1342,7 @@ export * from "./app.js";
 - [ ] **Step 5: Run tests**
 
 Run: `pnpm vitest run apps/api && pnpm typecheck`
-Expected: PASS — 30 tests, typecheck clean
+Expected: PASS — 31 tests, typecheck clean
 
 - [ ] **Step 6: Update ATTRIBUTION.md and commit**
 
@@ -1365,7 +1370,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 
 ## Definition of done
 
-- [ ] `pnpm test` passes — 44 kernel, 49 ledger, 30 api, 19 obligations, 11 core, 27 yields (180 total)
+- [ ] `pnpm test` passes — 44 kernel, 49 ledger, 31 api, 19 obligations, 11 core, 27 yields (181 total)
 - [ ] `pnpm typecheck` clean
 - [ ] A vetoed run creates zero intents
 - [ ] An escalated run moves no money until approved
