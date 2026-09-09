@@ -1,3 +1,5 @@
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 import Database from "better-sqlite3";
 
 export type Ledger = {
@@ -48,6 +50,10 @@ CREATE INDEX IF NOT EXISTS idx_runs_status  ON runs(status);
  * guarantee would rest on application code remembering to check.
  */
 export function openLedger(path = ".idle/ledger.db"): Ledger {
+  // better-sqlite3 refuses to create the parent directory, so a fresh clone
+  // would fail on first boot with "directory does not exist" — the first
+  // thing anyone following the README would hit.
+  if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
   const raw = new Database(path);
   raw.pragma("journal_mode = WAL");
   raw.pragma("foreign_keys = ON");
