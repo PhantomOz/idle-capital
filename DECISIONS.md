@@ -254,3 +254,54 @@ answer to the operator's actual question, which is *where can my money go?*
 
 Found by looking at the running page against live data, not by reading the
 component.
+
+---
+
+## D-014 — The Privy wallet signs Arc, so no private key enters this process
+
+**Date:** 2026-09-09 · **Status:** Adopted · **Amends:** spec §4 `chain`
+
+Arc settlement transactions are built locally, signed by the Privy server
+wallet through `POST /v1/wallets/{id}/rpc`, and broadcast by us.
+`ARC_PRIVATE_KEY` is read exactly once — for the one-off transfer that funded
+the Privy wallet — and never at runtime.
+
+**Why:** the spike showed a Privy-signed payload carrying `chain_id 5042002`,
+so Privy can sign for Arc directly. Two consequences follow, and both are
+improvements:
+
+1. **No private key is in our process, our config, or our memory.** The worst
+   outcome of compromising this service is issuing signing *requests*, which
+   the policy bounds.
+2. **The policy becomes load-bearing.** Every Arc movement passes through it.
+   Had we signed locally, the Privy policy would have gated the Earn flow only
+   — a control over part of the money is a weaker claim than a control over
+   all of it.
+
+Verified end to end: 0.1 USDC settled on Arc in tx `0x5895e0ae…`, signed by
+Privy, with no key held locally.
+
+---
+
+## D-015 — Two movement ceilings, deliberately different
+
+**Date:** 2026-09-09 · **Status:** Adopted
+
+The kernel caps movement per run at **8 USDC**. The Privy wallet policy caps
+value per transaction at **10 USDC**. They are not meant to match.
+
+**Why:** the kernel is the everyday constraint — tight, expressive, aware of
+positions and churn. The wallet policy is the backstop that still holds when
+the kernel does not run at all: a compromised orchestrator, a bug that skips
+validation, an operator calling the API by hand. Setting them equal would
+make the outer bound redundant; setting the outer one *lower* would mean
+kernel-approved runs get refused at the wallet, training whoever is on call to
+ignore refusals.
+
+Outer bound above inner bound is the only ordering where both gates mean
+something.
+
+**Found by a live test, not by design review.** The first real settlement
+attempt was refused — `policy_violation` — because the ceiling had been left
+at the arbitrary value used to prove enforcement during the spike. The control
+worked; the number was wrong. Which is the good failure of the two.
