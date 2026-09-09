@@ -33,7 +33,7 @@ export function validate(proposal: unknown, state: TreasuryState, policy: Policy
       k2Conservation(p, state),
       k1BufferCoverage(p, state, policy),
       k3MarketExists(p, state),
-      k4Allowlist(p, policy),
+      k4Allowlist(p, state, policy),
     ]);
     if (vetoes.length > 0) return { kind: "vetoed", breaches: vetoes };
 
