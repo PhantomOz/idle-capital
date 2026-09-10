@@ -3,6 +3,14 @@ import type { Market, Proposal } from "@idle/core";
 import { openLedger } from "@idle/ledger";
 import { createApp, loadPolicy, type OrchestratorDeps } from "../src/index.js";
 
+/**
+ * These suites test the orchestrator, not the operator's venue choice. Reading
+ * the deployment default coupled them to it: narrowing the shipped allowlist to
+ * the one venue this deployment can execute against turned nine passing tests
+ * into K4 vetoes overnight.
+ */
+const TEST_ENV = { PROTOCOL_ALLOWLIST: "aave-v3,compound-v3" };
+
 function market(id: string): Market {
   return {
     id, protocol: "aave-v3", chain: "ethereum",
@@ -25,7 +33,7 @@ function deps(proposal?: Proposal): OrchestratorDeps {
       rationale: "park the surplus",
     }) },
     execution: { submit: vi.fn(async () => "0xtx"), checkStatus: vi.fn(async () => "confirmed" as const) },
-    policy: loadPolicy({}),
+    policy: loadPolicy(TEST_ENV),
     obligations: [],
     now: () => new Date("2026-09-09T00:00:00Z"),
   };

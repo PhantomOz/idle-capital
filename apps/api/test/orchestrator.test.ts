@@ -3,6 +3,14 @@ import type { Market, Obligation, Proposal } from "@idle/core";
 import { getRun, listIntents, openLedger } from "@idle/ledger";
 import { approveRun, loadPolicy, rejectRun, startRun, type OrchestratorDeps } from "../src/index.js";
 
+/**
+ * These suites test the orchestrator, not the operator's venue choice. Reading
+ * the deployment default coupled them to it: narrowing the shipped allowlist to
+ * the one venue this deployment can execute against turned nine passing tests
+ * into K4 vetoes overnight.
+ */
+const TEST_ENV = { PROTOCOL_ALLOWLIST: "aave-v3,compound-v3" };
+
 const ASOF = new Date("2026-09-09T00:00:00Z");
 
 function market(id: string, over: Partial<Market> = {}): Market {
@@ -37,7 +45,7 @@ function deps(over: Partial<OrchestratorDeps> = {}): OrchestratorDeps {
     treasury: { snapshot: vi.fn(async () => ({ totalUsdc: 100_000_000n, positions: [] })) },
     proposer: { propose: vi.fn(async () => proposal) },
     execution: { submit: vi.fn(async () => "0xtx"), checkStatus: vi.fn(async () => "confirmed" as const) },
-    policy: loadPolicy({}),
+    policy: loadPolicy(TEST_ENV),
     obligations: OBLIGATIONS,
     now: () => ASOF,
     ...over,

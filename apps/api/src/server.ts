@@ -8,7 +8,7 @@ import type { Address } from "viem";
 import type { Market, Position } from "@idle/core";
 import { createApp } from "./app.js";
 import { loadPolicy } from "./config.js";
-import { DEMO_OBLIGATIONS } from "./obligations-fixture.js";
+import { loadObligations } from "./obligations-fixture.js";
 import type { MarketsPort, OrchestratorDeps } from "./index.js";
 
 function required(name: string): string {
@@ -87,7 +87,7 @@ const deps: OrchestratorDeps = {
   ledger, markets, treasury,
   proposer: createProposer({ apiKey: required("ANTHROPIC_API_KEY") }),
   execution, policy,
-  obligations: DEMO_OBLIGATIONS,
+  obligations: loadObligations(process.env),
   now: () => new Date(),
 };
 

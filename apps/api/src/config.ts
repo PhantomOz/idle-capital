@@ -12,13 +12,20 @@ function int(env: NodeJS.ProcessEnv, key: string, fallback: number): number {
  * The operator's policy. Trusted configuration, unlike an agent proposal —
  * written by a human and reviewed, not generated.
  *
- * The allowlist default is the blue-chip set: audited, deeply liquid, and
- * defensible to anyone asking why these three. Every other protocol in the
- * registry still appears in the comparison the agent reasons over; they just
- * cannot receive funds.
+ * The allowlist is the set of venues funds may ENTER, which is narrower than
+ * the set of protocols an operator considers acceptable. This deployment holds
+ * one execution adapter: the curated Morpho vault reached through Privy Earn.
+ * Aave v3, Compound v3 and Spark are acceptable protocols and stay in the
+ * comparison the agent reasons over — but listing them here would authorise
+ * deposits into venues nothing can deposit into, and a live run duly proposed
+ * parking 70% of the surplus across two of them. An allowlist that names
+ * unreachable venues is not a policy, it is a trap. D-016.
+ *
+ * Widening it is a one-line operator change once an adapter exists:
+ * PROTOCOL_ALLOWLIST=privy-earn,aave-v3
  */
 export function loadPolicy(env: NodeJS.ProcessEnv = process.env): Policy {
-  const allowlist = (env.PROTOCOL_ALLOWLIST ?? "aave-v3,compound-v3,spark-lend")
+  const allowlist = (env.PROTOCOL_ALLOWLIST ?? "privy-earn")
     .split(",").map((s) => s.trim()).filter((s) => s.length > 0);
 
   return {
