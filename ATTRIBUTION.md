@@ -48,6 +48,8 @@ video — which is narrated by a team member and is not AI-generated.
 | `packages/agent/**` | `AI` | Prompt, forced-tool schema and defensive parsing; the prompt's framing is a team decision |
 | `packages/chain/**` | `AI` | Arc client; the native-USDC finding came from probing the live chain |
 | `packages/wallet/**` | `AI` | Privy client, treasury and executor; the two-ceiling design is a team decision (D-015) |
+| `scripts/refund.ts` | `AI` | Returns the settlement balance so the demo repeats; the counterparty decision is the team's (D-019) |
+| `apps/api/src/obligations-fixture.ts` | `AI+H` | Business schedule is company data supplied by the team; the testnet scaling and its rationale are AI, reviewed |
 
 *(Rows are appended as files land. See git history for the ordering.)*
 

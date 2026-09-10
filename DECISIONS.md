@@ -305,3 +305,91 @@ something.
 attempt was refused — `policy_violation` — because the ceiling had been left
 at the arbitrary value used to prove enforcement during the spike. The control
 worked; the number was wrong. Which is the good failure of the two.
+
+---
+
+## D-016 — The allowlist names venues that can receive funds, not protocols we approve of
+
+**Date:** 2026-09-10 · **Status:** Adopted
+
+`PROTOCOL_ALLOWLIST` defaults to **`privy-earn`** alone — the curated Morpho
+vault reached through Privy Earn, which is the only venue this deployment holds
+an execution adapter for. Aave v3, Compound v3 and Spark remain in the
+comparison set the agent reasons over. They are not fundable.
+
+**Why:** the allowlist is the gate K4 enforces on *deposits*. Listing a protocol
+we cannot deposit into does not express a risk preference, it authorises a
+transfer that must then fail. A live run proved the point: with the three
+blue-chips allowlisted the agent parked 70% of the surplus across two of them,
+the kernel approved it, and execution settled all three legs as Arc transfers —
+the compound-v3 and aave-v3 "deposits" existed only as ledger rows.
+
+An allowlist that names unreachable venues is not a policy, it is a trap.
+
+Widening it stays a one-line operator change: `PROTOCOL_ALLOWLIST=privy-earn,aave-v3`
+once an adapter exists. The operator's original answer — blue-chip protocols
+only — survives as the rule for *what may be added*, which is what it was for.
+
+**Consequence, accepted:** one fundable venue means every allocation puts 100%
+of parked capital in it, so K5 escalates every run to human approval. That is
+the correct reading of a concentration limit, and the approval queue exists for
+exactly this.
+
+---
+
+## D-017 — The agent is never asked to do money arithmetic
+
+**Date:** 2026-09-10 · **Status:** Adopted
+
+The prompt states the **finished** numbers: the minimum hold, computed with the
+same `applyBpsCeil` the kernel validates against, and the maximum deployable.
+It no longer gives the agent a buffer and a basis-point multiplier to combine.
+
+**Why:** a live run proposed a hold of 7,014,550 against a floor of 7,015,000
+and was vetoed for a shortfall of **450 minor units — $0.00045**. The reasoning
+was sound; the ceiling division was not. Every other layer of this system
+refuses to let a float near money, and then we asked a language model to
+multiply by 11,500 basis points and round up.
+
+Same discipline as `divCeil` and `applyBpsCeil`: compute money once, in one
+place, and pass the result.
+
+---
+
+## D-018 — Two market lists in the prompt, capped separately
+
+**Date:** 2026-09-10 · **Status:** Adopted
+
+The prompt shows every allowlisted venue, then the top 20 forbidden venues as a
+labelled comparison set. It previously showed the top 25 markets by rate.
+
+**Why:** on live Graph data the highest rates are all abandoned subgraphs —
+rari-fuse at 12,728,198% on negative liquidity, then four more above 800%. Of
+the eight allowlisted markets in a real run, the best paid 4.93% and **not one
+reached the top 25**. The agent was shown a page with no usable venue on it and
+reported, correctly, that nothing was fundable. It held the entire surplus and
+the rationale read as caution rather than as the blind spot it was.
+
+A truncation by rate decided which venues the agent was permitted to consider.
+Nothing may do that except the policy.
+
+D-013 was the same failure in the UI and was fixed by restructuring rather than
+by raising a row limit. This is that fix applied to the prompt.
+
+---
+
+## D-019 — The settlement counterparty is a different account
+
+**Date:** 2026-09-10 · **Status:** Adopted
+
+`SETTLEMENT_ADDRESS` is set to the funded Arc EOA, not left to default to the
+treasury wallet. `pnpm demo:refund` returns the balance so the demo repeats.
+
+**Why:** defaulting to the treasury wallet made every settlement a transfer
+from an address to itself. It confirms on-chain, it costs gas, and it moves
+nothing — a reviewer opening the transaction sees a self-transfer and is right
+to discount it. Proving a settlement rail requires a counterparty.
+
+The refund script uses `ARC_PRIVATE_KEY`, the faucet EOA's. The treasury wallet
+still has no key in this repo (D-014); funding and refunding are the same
+category of operator action, and both are disclosed.
