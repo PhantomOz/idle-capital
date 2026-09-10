@@ -393,3 +393,27 @@ to discount it. Proving a settlement rail requires a counterparty.
 The refund script uses `ARC_PRIVATE_KEY`, the faucet EOA's. The treasury wallet
 still has no key in this repo (D-014); funding and refunding are the same
 category of operator action, and both are disclosed.
+
+---
+
+## D-020 — Two obligation schedules, and the demo runs the scaled one
+
+**Date:** 2026-09-10 · **Status:** Adopted
+
+`OBLIGATIONS` selects between the business's real schedule ($12,200 over 30
+days) and a 1/2000 testnet scaling ($6.10). The scaled one is the default.
+
+**Why:** the treasury this build controls is a testnet faucet balance of about
+12 USDC. Against the real schedule the agent is correct to park nothing on every
+run forever — obligations exceed capital by three orders of magnitude, K1 vetoes
+any surplus, and the demonstration proves the buffer invariant and nothing else.
+The allocate → escalate → approve → settle path is never reached.
+
+Scaling the obligations rather than inflating the treasury keeps every figure in
+the demo a real one. The currencies, the categories, the due dates and the FX
+table are untouched. The settlement is a real transaction for its real amount.
+Only the denomination moves, and it moves visibly — the ids carry a `-scaled`
+suffix so a ledger row can never be mistaken for the business's own.
+
+`OBLIGATIONS=business` runs the real schedule and shows K1 refusing the whole
+surplus, which is the other half of the demonstration.
