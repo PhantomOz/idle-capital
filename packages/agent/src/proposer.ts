@@ -2,10 +2,23 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { Allocation, Proposal } from "@idle/core";
 import { ALLOCATION_TOOL, buildPrompt, type ProposalContext } from "./prompt.js";
 
-/** Strict decimal-integer string to bigint. Rejects "1.5", "1e3", "" and " 1". */
+/**
+ * Strict decimal-integer string to bigint. Rejects "1.5", "1e3", "" and " 1".
+ *
+ * One transport artefact is unwrapped first: a value arriving as `"\"123\""`,
+ * a JSON string whose content is itself a quoted number. Models produce this
+ * intermittently when a schema asks for a number carried in a string, and it
+ * cost a live run. Stripping a matched pair of quote characters is not
+ * repairing a number — the digits are untouched, and an unbalanced quote or
+ * anything non-integral inside still fails.
+ */
 function toMinor(v: unknown): bigint | null {
-  if (typeof v !== "string" || !/^-?\d+$/.test(v)) return null;
-  try { return BigInt(v); } catch { return null; }
+  if (typeof v !== "string") return null;
+  const unwrapped = v.length >= 2 && v.startsWith('"') && v.endsWith('"')
+    ? v.slice(1, -1)
+    : v;
+  if (!/^-?\d+$/.test(unwrapped)) return null;
+  try { return BigInt(unwrapped); } catch { return null; }
 }
 
 /**
@@ -68,11 +81,23 @@ export function createProposer(opts: ProposerOptions = {}) {
       const block = (res.content as { type: string; name?: string; input?: unknown }[])
         .find((b) => b.type === "tool_use" && b.name === ALLOCATION_TOOL.name);
       if (block === undefined) {
-        throw new Error("Agent did not call the submit_allocation tool");
+        throw new Error(`Agent did not call the submit_allocation tool (stop_reason ${res.stop_reason})`);
       }
       const proposal = parseProposal(block.input);
       if (proposal === null) {
-        throw new Error(`Agent returned an invalid proposal: ${JSON.stringify(block.input).slice(0, 200)}`);
+        // A payload cut off at the token ceiling and a payload of the wrong
+        // shape fail identically here and are fixed completely differently, so
+        // the reason has to name which one happened.
+        if (res.stop_reason === "max_tokens") {
+          throw new Error(
+            `Agent ran out of output tokens mid-proposal (max_tokens ${maxTokens}); ` +
+            `the tool payload is incomplete`,
+          );
+        }
+        throw new Error(
+          `Agent returned an invalid proposal (stop_reason ${res.stop_reason}): ` +
+          JSON.stringify(block.input),
+        );
       }
       return proposal;
     },

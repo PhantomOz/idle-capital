@@ -100,3 +100,95 @@ describe("parseProposal", () => {
     expect(parseProposal({ hold: "1.5", allocations: [], rationale: "x" })).toBeNull();
   });
 });
+
+describe("buildPrompt market sections", () => {
+  /**
+   * The regression that cost a live run. On real Graph data the top rates are
+   * all abandoned subgraphs, so a single rate-sorted list truncated to N rows
+   * contained zero allowlisted venues and the agent parked nothing.
+   */
+  it("shows an allowlisted venue even when forbidden venues out-rate it by orders of magnitude", () => {
+    const junk = Array.from({ length: 40 }, (_, i) =>
+      market(`rari-fuse:0x${i}`, { protocol: "rari-fuse", supplyApy: 1_000 + i, liquidityUsd: -5_000 }),
+    );
+    const p = buildPrompt(ctx({ markets: [...junk, market("aave-v3:0xa", { supplyApy: 0.037 })] }));
+    expect(p).toContain("aave-v3:0xa");
+  });
+
+  it("caps the forbidden list so the prompt cannot be flooded", () => {
+    const junk = Array.from({ length: 90 }, (_, i) =>
+      market(`rari-fuse:0x${i}`, { protocol: "rari-fuse", supplyApy: 1_000 + i }),
+    );
+    const p = buildPrompt(ctx({ markets: [...junk, market("aave-v3:0xa")] }));
+    expect(p.split("rari-fuse:0x").length - 1).toBe(20);
+  });
+
+  it("separates the two lists so allowed and forbidden are never read as one table", () => {
+    const p = buildPrompt(ctx());
+    expect(p).toContain("VENUES THAT MAY RECEIVE FUNDS");
+    expect(p).toContain("comparison only, funds may not enter");
+    expect(p.indexOf("VENUES THAT MAY RECEIVE FUNDS")).toBeLessThan(p.indexOf("EVERY OTHER VENUE"));
+  });
+
+  it("says so plainly when no venue may receive funds", () => {
+    const p = buildPrompt(ctx({ markets: [market("rari-fuse:0xr", { protocol: "rari-fuse" })] }));
+    expect(p).toContain("nothing may receive funds this run");
+  });
+});
+
+describe("buildPrompt arithmetic", () => {
+  /**
+   * A live run proposed a hold 450 minor units under the floor because the
+   * prompt gave it the buffer and the multiplier and left the ceiling division
+   * to the model. The kernel vetoed it. The prompt now states the finished
+   * number, computed by the same function the kernel validates with.
+   */
+  it("states the hold floor as a finished number, not a multiplication to perform", () => {
+    const p = buildPrompt(ctx({ bufferRequiredUsdc: 6_100_000n }));
+    expect(p).toContain("hold AT LEAST 7015000");
+  });
+
+  it("rounds the floor UP, so a fractional requirement never under-reserves", () => {
+    // 1_000_001 x 11500bps = 1_150_001.15 -> 1_150_002
+    const p = buildPrompt(ctx({ bufferRequiredUsdc: 1_000_001n }));
+    expect(p).toContain("hold AT LEAST 1150002");
+  });
+
+  it("states the deployable ceiling so the agent need not subtract either", () => {
+    const p = buildPrompt(ctx({ totalUsdc: 11_999_550n, bufferRequiredUsdc: 6_100_000n }));
+    expect(p).toContain("most you may park this run: 4984550");
+  });
+
+  it("reports zero deployable rather than a negative when obligations exceed the treasury", () => {
+    const p = buildPrompt(ctx({ totalUsdc: 1_000_000n, bufferRequiredUsdc: 6_100_000n }));
+    expect(p).toContain("most you may park this run: 0");
+  });
+});
+
+describe("parseProposal transport artefacts", () => {
+  const base = { hold: "1", allocations: [], rationale: "because" };
+
+  it("accepts a number wrapped in literal quote characters, as models sometimes emit", () => {
+    expect(parseProposal({ ...base, hold: '"7015000"' })?.hold).toBe(7_015_000n);
+  });
+
+  it("unwraps quoted allocation amounts too", () => {
+    const p = parseProposal({
+      ...base,
+      allocations: [{ marketId: "aave-v3:0xa", amountUsdc: '"1500000"' }],
+    });
+    expect(p?.allocations[0]?.amountUsdc).toBe(1_500_000n);
+  });
+
+  it("still rejects a non-integer inside the quotes", () => {
+    expect(parseProposal({ ...base, hold: '"1.5"' })).toBeNull();
+  });
+
+  it("still rejects an empty quoted string", () => {
+    expect(parseProposal({ ...base, hold: '""' })).toBeNull();
+  });
+
+  it("still rejects an unbalanced quote", () => {
+    expect(parseProposal({ ...base, hold: '"7015000' })).toBeNull();
+  });
+});
