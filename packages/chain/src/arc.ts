@@ -48,8 +48,13 @@ export function createArcClient(rpcUrl: string): ArcClient {
     },
 
     async buildTransfer({ from, to, amountUsdcMinor }) {
+      // "pending", not the default "latest". A run with several intents builds
+      // and broadcasts them back to back, and the latest-block count does not
+      // include a transaction already in the mempool — so every transfer after
+      // the first reused the same nonce and the node rejected it as a
+      // replacement. Observed live: two of three settlement legs lost.
       const [nonce, fees] = await Promise.all([
-        pub.getTransactionCount({ address: from }),
+        pub.getTransactionCount({ address: from, blockTag: "pending" }),
         pub.estimateFeesPerGas(),
       ]);
       return {
