@@ -15,21 +15,36 @@ settles through a policy-bound **Privy** wallet onto **Arc**.
 
 ---
 
-## What one run looks like
+## What it looks like
+
+Onboard a business and it gets **its own wallet**, provisioned over the API with
+**its own spending policy** attached before the wallet exists to be funded:
 
 ```
-POST /runs
+POST /businesses {"name": "Bahari Logistics"}
+  → wallet 0x4Bc549B6200E88eC15C414F8d5a5CF5AFF01d785
+  → policy created, attached at birth, enforced by Privy
 ```
+
+Fund it, tell it what the business owes, and ask:
 
 ```
 The Graph        104 markets across 21 protocols, one standardized query
-Agent            holds 11.997128 USDC, parks 8.000000 in the Earn vault
-Kernel           K5 ESCALATED — 100% of parked capital in one venue
+Agent            keep $2.30 liquid against the 20 Sep payroll, move $2.70
+Kernel           K5 ESCALATED — all of the surplus in one venue
                  zero intents created; nothing moves
-POST /runs/:id/approve
-Privy            signs remotely; no private key exists in this process
-Arc              8 USDC settled — 0x5720e045…, nonce 3, confirmed
+[Approve]
+Privy            that business's wallet signs; no private key in this process
+Arc              2.70 USDC settled, confirmed
 ```
+
+Two businesses, two wallets, two treasuries, no shared state:
+
+| | Zamara Textiles | Bahari Logistics |
+|---|---|---|
+| Wallet | `0x6689Dc…B349` | `0x4Bc549…d785` |
+| Owes | supplier 20 Sep, rent 28 Sep | payroll 20 Sep |
+| Liquid / committed | $3.44 / $3.55 | $2.29 / $2.70 |
 
 The agent's own words from that run:
 
@@ -108,14 +123,36 @@ pnpm dev:web
 Open the URL Vite prints — usually `http://localhost:5173`, or the next free
 port. It proxies `/api` to the backend.
 
-Press **Run the agent now**. If the kernel escalates, an **Approve** button
-appears on the run.
+Then:
+
+1. **Create a business** — a wallet is provisioned for it and you get an address.
+2. **Fund it** — press *Send 5 test USDC*, or send USDC to the address yourself.
+3. **Add what it owes** — amounts in the currency they are owed in, with due dates.
+4. **Ask the agent** — it compares today's live rates against that schedule.
+5. **Approve** — if the kernel escalated, the money moves only when you say so.
+
+A business is seeded on first boot from `PRIVY_WALLET_ID`, so there is a funded
+tenant to run immediately. Creating a second one exercises the real onboarding
+path.
 
 ### Or drive it from the terminal
 
 ```bash
-curl -s localhost:8787/markets  | jq '.markets | length'      # live market count
-curl -s -X POST localhost:8787/runs | jq '.run.status, .run.verdict'
+curl -s localhost:8787/markets | jq '.markets | length'        # live market count
+
+BID=$(curl -s -X POST localhost:8787/businesses \
+  -H 'content-type: application/json' \
+  -d '{"name":"Bahari Logistics"}' | jq -r .business.id)
+
+curl -s -X POST localhost:8787/businesses/$BID/fund \
+  -H 'content-type: application/json' -d '{"amountUsdc":"5000000"}'
+
+curl -s -X PUT localhost:8787/businesses/$BID/obligations \
+  -H 'content-type: application/json' -d '{"obligations":[
+    {"currency":"NGN","amountMinor":"320000","dueDate":"2026-09-20","category":"payroll"}
+  ]}'
+
+curl -s -X POST localhost:8787/businesses/$BID/runs | jq '.run.status, .run.verdict'
 curl -s -X POST localhost:8787/runs/<run-id>/approve | jq '.intents'
 ```
 
@@ -151,6 +188,8 @@ Three of the tests are worth reading rather than just running:
 - **`packages/agent/test/prompt.test.ts`** — asserts an allowlisted venue
   survives a market list flooded with higher-rate junk. That regression cost a
   live run.
+- **`packages/ledger/test/businesses.test.ts`** — asserts one business can never
+  read another's obligations, in both directions.
 - **`packages/yields/test/registry.test.ts`** — asserts the query document names
   no protocol. One standardized document, 26 deployments.
 
@@ -216,6 +255,7 @@ Everything in this system that is not live, in full:
 | Path | Contents |
 |---|---|
 | `docs/architecture.md` | How it is built and why, with diagrams |
+| `docs/architecture.md` §11 | Tenancy: how a business gets a wallet nothing else can spend |
 | `DECISIONS.md` | Twenty architectural calls, each with its reasoning |
 | `ATTRIBUTION.md` | Which files are AI-generated or AI-assisted, per file |
 | `specs/` | Every spec, versioned as it changed |

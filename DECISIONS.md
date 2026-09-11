@@ -417,3 +417,76 @@ suffix so a ledger row can never be mistaken for the business's own.
 
 `OBLIGATIONS=business` runs the real schedule and shows K1 refusing the whole
 surplus, which is the other half of the demonstration.
+
+---
+
+## D-021 — A business is the tenant, and its wallet is born guarded
+
+**Date:** 2026-09-11 · **Status:** Adopted
+
+Onboarding creates a Privy **policy first**, then creates the wallet with that
+policy already attached. One business, one wallet, one enforced spending
+envelope, all over the API with no dashboard step.
+
+**Why a tenant at all:** the build held one wallet configured by hand in a
+`.env`. That is a demo, not a financial product — and "Best B2B Financial
+Product" is a track judged by the company whose entire purpose is provisioning
+wallets per customer. Using one manually-created wallet under-uses the sponsor's
+product on the track that sponsor judges.
+
+**Why in that order:** a wallet created first and guarded second is unguarded
+for as long as the second call takes. Onboarding is exactly when an address is
+being watched and funded, so that window is the worst possible one to leave
+open. The order is enforced by a test that asserts the two calls happen in
+sequence and that no wallet is created when the policy call fails.
+
+**Proved, not assumed.** A freshly provisioned wallet refused a signature over
+its ceiling and accepted one under it, before any code was written against the
+API. Same standard as D-014: a control nobody has watched refuse something is
+not yet a control.
+
+---
+
+## D-022 — Parked capital comes from the business's own books
+
+**Date:** 2026-09-11 · **Status:** Adopted
+
+Positions are derived from confirmed intents — deposits add, withdrawals
+subtract — scoped to the business. A live Earn position takes precedence when
+the vault reports one.
+
+**Why:** the settlement leg moves USDC out of the wallet on Arc. Reading the
+balance alone, a business looked *poorer* after every approved run: $7.00 became
+$3.44 and the $3.55 it had committed was recorded nowhere. The treasury page
+showed a company that had lost money by following its own agent's advice.
+
+A treasury system keeps books precisely because the balance is not the whole
+position. This is that. It is deliberately **not** a claim that the funds are
+earning — the vault-side deposit is a mainnet step this deployment does not
+take, and the UI says so on the run that settled rather than implying a yield
+nobody is collecting.
+
+The venue's own answer wins when there is one. Our record is the fallback, not
+the authority.
+
+---
+
+## D-023 — The page leads with the decision, not the machinery
+
+**Date:** 2026-09-11 · **Status:** Adopted
+
+Rebuilt around: what you owe → what must stay liquid and why → what the agent
+decided, in one sentence → what needs you. Onboarding and funding are screens.
+
+**Why:** the previous page opened with "Markets 104 / Protocols 21" and never
+displayed the obligations at all. It rendered the answer and hid the question —
+a reader could see the agent holding $3.45 and had no way to learn why that
+number rather than another. Every input to the decision was invisible.
+
+It also spoke in machine: `privy-earn`, `K5`, `8.000000`, "held liquid". Those
+are correct and none of them are reasons. The rule codes stay on the page,
+small, because an operator needs to find the policy and a reviewer needs to see
+the kernel ran — but the sentence leads.
+
+**How it was found:** not by review. The person it was built for looked at it
+and could not tell who it was for or when the agent did anything.

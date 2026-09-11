@@ -165,7 +165,8 @@ flowchart TD
 | `@idle/chain` | Arc client. USDC is the **native** gas token; settlement is a value transfer | Pending nonce, so a multi-intent run does not collide with itself |
 | `@idle/wallet` | Privy server wallet, policy, Earn vault | Signs *before* broadcasting, so a policy refusal costs nothing (D-014) |
 | `apps/api` | Orchestrator, ports, HTTP | Every port is real in `server.ts`; the fakes live only in tests |
-| `apps/web` | Ledger-sheet UI | Restructured so the refusal is the headline, not row 47 (D-013) |
+| `apps/web` | Ledger-sheet UI | Restructured so the refusal is the headline, not row 47 (D-013); rebuilt again around the decision rather than the machinery (D-023) |
+| `@idle/wallet` (provisioner) | Onboards a business: policy, then wallet born with it attached | No tenant wallet exists unguarded, even briefly (D-021) |
 
 ---
 
@@ -330,16 +331,86 @@ A sort had silently decided what the agent was allowed to consider (D-018).
 |---|---|---|
 | `GET` | `/health` | Liveness |
 | `GET` | `/policy` | The active policy, bigints as strings |
-| `GET` | `/markets` | The live market set this run would reason over |
-| `POST` | `/runs` | Start a run — the whole pipeline |
-| `GET` | `/runs` | Run history |
+| `GET` | `/markets` | The live market set every run reasons over |
+| `POST` | `/businesses` | Onboard — provisions a wallet, returns an address to fund |
+| `GET` | `/businesses` | Every business |
+| `GET` | `/businesses/:id` | One business: treasury, schedule, runs |
+| `PUT` | `/businesses/:id/obligations` | Replace the forward schedule |
+| `POST` | `/businesses/:id/fund` | Testnet faucet into that business's wallet |
+| `POST` | `/businesses/:id/runs` | Start a run for that business |
+| `GET` | `/businesses/:id/runs` | That business's runs, and no other's |
 | `GET` | `/runs/:id` | One run with its intents |
 | `POST` | `/runs/:id/approve` | Approve an escalated run |
 | `POST` | `/runs/:id/reject` | Reject an escalated run; moves no money |
 
+Every run lives under a business. There is no unscoped `POST /runs`, because
+there is no ambient treasury for it to act on.
+
 ---
 
-## 11. What is deliberately absent
+## 11. Tenancy
+
+A business is the unit of everything: one business, one wallet, one schedule,
+one set of runs.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as Operator
+    participant API as Idle Capital
+    participant PV as Privy
+    participant AC as Arc
+
+    U->>API: POST /businesses {name}
+    API->>PV: create policy (ceiling, chain)
+    PV-->>API: policy id
+    API->>PV: create wallet WITH that policy attached
+    PV-->>API: wallet id + address
+    API-->>U: fund this address
+
+    U->>AC: send USDC to the address
+    U->>API: PUT /obligations — what the business owes
+    U->>API: POST /runs
+    Note over API: orchestrator built against<br/>THIS business's wallet and schedule
+    API->>PV: eth_signTransaction (that wallet)
+    PV->>PV: that wallet's policy decides
+    PV-->>API: signature, or refusal
+    API->>AC: settle
+```
+
+**The policy is created before the wallet, and attached at creation.** Creating
+a wallet first and guarding it afterwards leaves a window in which a funded
+tenant wallet will sign anything — and onboarding is precisely when an address
+is being watched. Proven, not assumed: a freshly provisioned wallet refuses a
+signature over its ceiling (`specs/spikes/2026-09-11-tenant-provisioning-spike.md`).
+
+**Isolation lives in the query, not in a convention.** `depsFor(business)`
+builds the orchestrator against one business's wallet and one business's
+obligations; there is no module-level treasury to reach past it. Tests assert
+the isolation in both directions — neither business reads the other's
+obligations, and replacing one schedule leaves the other alone.
+
+**Obligation ids belong to the business.** "sep-payroll" is a label two
+customers will both use, so the key is composite. Keyed globally, the second
+customer to save a schedule got a constraint violation.
+
+### Where parked capital lives
+
+The settlement leg moves USDC out of the wallet on Arc, so a balance read alone
+would show a business as *poorer* after every approved run, and K2's
+conservation check would never balance. Positions are therefore derived from
+the business's own confirmed intents — deposits add, withdrawals subtract —
+which is what a treasury system's books are for.
+
+When the Earn vault reports a real position for that wallet it takes
+precedence: the venue's own answer beats ours. On testnet it reports nothing.
+The UI splits **liquid** from **committed** and says plainly that the
+vault-side deposit is a mainnet step this deployment does not take, rather than
+implying a yield nobody is collecting.
+
+---
+
+## 12. What is deliberately absent
 
 - **No market cache.** K3 depends on freshness (§5).
 - **No retry loop around the agent.** A failed run is a recorded fact; the
@@ -348,5 +419,9 @@ A sort had silently decided what the agent was allowed to consider (D-018).
 - **No private key for the treasury wallet.** Anywhere. Privy signs (D-014).
   The one key in this repo belongs to the faucet EOA and is used for funding
   and refunding only.
+- **No authentication.** Anyone who reaches the API can open any business. A
+  demo, and disclosed as one: tenancy here is about isolating treasuries from
+  each other's decisions, not about defending them from an attacker who already
+  has the URL. Real deployment puts auth in front of `/businesses/:id`.
 - **No fiat rails.** Cut on day one against a compressed week (D-005), and
   disclosed as cut rather than quietly descoped.
