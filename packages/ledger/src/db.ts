@@ -9,6 +9,28 @@ export type Ledger = {
   close(): void;
 };
 
+/**
+ * Obligation ids are the business's own labels — "sep-payroll" is a name two
+ * customers will both use. The key is therefore composite: unique within a
+ * business, never across the estate.
+ */
+const OBLIGATIONS_DDL = `
+CREATE TABLE IF NOT EXISTS obligations (
+  business_id  TEXT NOT NULL REFERENCES businesses(id),
+  id           TEXT NOT NULL,
+  currency     TEXT NOT NULL,
+  -- TEXT for the same reason as every other amount in this schema.
+  amount_minor TEXT NOT NULL,
+  due_date     TEXT NOT NULL,
+  category     TEXT NOT NULL,
+  confidence   REAL NOT NULL,
+  created_at   TEXT NOT NULL,
+  PRIMARY KEY (business_id, id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_obligations_biz ON obligations(business_id, due_date);
+`;
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS businesses (
   id            TEXT PRIMARY KEY,
@@ -20,20 +42,6 @@ CREATE TABLE IF NOT EXISTS businesses (
   policy_id     TEXT NOT NULL,
   created_at    TEXT NOT NULL
 );
-
-CREATE TABLE IF NOT EXISTS obligations (
-  id           TEXT PRIMARY KEY,
-  business_id  TEXT NOT NULL REFERENCES businesses(id),
-  currency     TEXT NOT NULL,
-  -- TEXT for the same reason as every other amount in this schema.
-  amount_minor TEXT NOT NULL,
-  due_date     TEXT NOT NULL,
-  category     TEXT NOT NULL,
-  confidence   REAL NOT NULL,
-  created_at   TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_obligations_biz ON obligations(business_id, due_date);
 
 CREATE TABLE IF NOT EXISTS runs (
   id          TEXT PRIMARY KEY,
@@ -88,6 +96,17 @@ export function openLedger(path = ".idle/ledger.db"): Ledger {
     raw,
     migrate() {
       raw.exec(SCHEMA);
+      raw.exec(OBLIGATIONS_DDL);
+
+      // An obligations table keyed on `id` alone predates the composite key
+      // and cannot hold two businesses' September payroll at once. Rebuild it:
+      // a schedule is a declaration a business re-enters, not a record of money
+      // that moved, so it is the one table here that is safe to drop.
+      const cols = raw.prepare("PRAGMA table_info(obligations)").all() as { pk: number }[];
+      if (cols.length > 0 && cols.filter((c) => c.pk > 0).length !== 2) {
+        raw.exec("DROP TABLE obligations");
+        raw.exec(OBLIGATIONS_DDL);
+      }
       // SQLite has no ADD COLUMN IF NOT EXISTS, so each of these is attempted
       // and its duplicate-column error swallowed. Ledgers written before a
       // column existed are still readable, which matters: this file holds the

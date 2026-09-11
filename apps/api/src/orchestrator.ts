@@ -29,12 +29,14 @@ export type OrchestratorDeps = {
  * that the kernel did not approve — a vetoed run creates zero intents rather
  * than intents nobody executes.
  */
-export async function startRun(deps: OrchestratorDeps, runId: string): Promise<Run> {
+export async function startRun(
+  deps: OrchestratorDeps, runId: string, businessId: string | null = null,
+): Promise<Run> {
   const { ledger, policy, obligations } = deps;
   const asOf = deps.now();
 
   // Created before the proposal exists so a failure here is still recorded.
-  createRun(ledger, runId, null);
+  createRun(ledger, runId, null, businessId);
 
   let markets;
   let snapshot;

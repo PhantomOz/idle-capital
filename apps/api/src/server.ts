@@ -1,13 +1,20 @@
 import { serve } from "@hono/node-server";
 import { getLendingMarkets } from "@idle/yields";
-import { openLedger, reconcile } from "@idle/ledger";
+import {
+  createBusiness, listBusinesses, listObligations, openLedger, reconcile,
+  setObligations, type Business,
+} from "@idle/ledger";
 import { createProposer } from "@idle/agent";
-import { createArcClient } from "@idle/chain";
-import { createPrivyArcExecutor, createPrivyClient, createPrivyTreasury } from "@idle/wallet";
+import { ARC_TESTNET, createArcClient } from "@idle/chain";
+import {
+  createPrivyArcExecutor, createPrivyClient, createPrivyProvisioner, createPrivyTreasury,
+} from "@idle/wallet";
 import type { Address } from "viem";
 import type { Market, Position } from "@idle/core";
-import { createApp } from "./app.js";
+import { createApp, type TenantHost } from "./app.js";
 import { loadPolicy } from "./config.js";
+import { createFaucet } from "./faucet.js";
+import { createStatusOnlyExecutor } from "./reconciler.js";
 import { loadObligations } from "./obligations-fixture.js";
 import type { MarketsPort, OrchestratorDeps } from "./index.js";
 
@@ -16,28 +23,27 @@ function required(name: string): string {
   if (v === undefined || v === "") throw new Error(`${name} is not set`);
   return v;
 }
+function optional(name: string): string | null {
+  const v = process.env[name];
+  return v === undefined || v === "" ? null : v;
+}
 
 const policy = loadPolicy(process.env);
 const ledger = openLedger(process.env.LEDGER_PATH ?? ".idle/ledger.db");
 
+const appId = required("PRIVY_APP_ID");
+const appSecret = required("PRIVY_APP_SECRET");
 const arc = createArcClient(required("ARC_RPC_URL"));
-const address = required("PRIVY_WALLET_ADDRESS") as Address;
-const vaultId = process.env.PRIVY_EARN_VAULT_ID ?? "";
-
-const privy = createPrivyClient({
-  appId: required("PRIVY_APP_ID"),
-  appSecret: required("PRIVY_APP_SECRET"),
-  walletId: required("PRIVY_WALLET_ID"),
-});
+const vaultId = optional("PRIVY_EARN_VAULT_ID") ?? "";
+const proposer = createProposer({ apiKey: required("ANTHROPIC_API_KEY") });
+const provisioner = createPrivyProvisioner({ appId, appSecret });
 
 /**
- * The market set the agent reasons over.
+ * The venues the agent compares, shared across every business.
  *
- * The Graph supplies breadth — every standardized lending market across 25
- * protocols, which is what makes the comparison meaningful. The Privy Earn
- * vault is appended because it is the one venue this treasury can actually
- * execute against, and a comparison that omits the executable option is not a
- * comparison.
+ * Market data is not tenant-specific — the rate Aave pays is the rate Aave
+ * pays. What differs per business is the treasury reading against it, and that
+ * lives in `depsFor`.
  */
 const markets: MarketsPort = {
   async fetch() {
@@ -48,7 +54,7 @@ const markets: MarketsPort = {
     const out: Market[] = [...res.markets];
     if (vaultId !== "") {
       try {
-        const v = await privy.earnVault(vaultId);
+        const v = await sharedPrivy.earnVault(vaultId);
         out.push({
           id: `privy-earn:${v.id}`,
           protocol: "privy-earn",
@@ -65,36 +71,92 @@ const markets: MarketsPort = {
   },
 };
 
-/** Parked capital lives in the Earn vault. Nothing else parks anything. */
-async function listPositions(): Promise<Position[]> {
-  if (vaultId === "") return [];
-  try {
-    const p = await privy.earnPosition(vaultId);
-    return p.assetsInVault > 0n
-      ? [{ marketId: `privy-earn:${vaultId}`, amountUsdc: p.assetsInVault }]
-      : [];
-  } catch { return []; }
+/** Any wallet can read the vault's public shape; positions are read per tenant. */
+const sharedPrivy = createPrivyClient({ appId, appSecret, walletId: optional("PRIVY_WALLET_ID") ?? "" });
+
+/**
+ * Build the orchestrator for exactly one business.
+ *
+ * Every port here is bound to that business's wallet: the balance read, the
+ * Earn position, the signer and the settlement all resolve through
+ * `business.walletId`. There is no ambient treasury for a run to reach.
+ */
+function depsFor(business: Business): OrchestratorDeps {
+  const privy = createPrivyClient({ appId, appSecret, walletId: business.walletId });
+  const address = business.address as Address;
+
+  async function listPositions(): Promise<Position[]> {
+    if (vaultId === "") return [];
+    try {
+      const p = await privy.earnPosition(vaultId);
+      return p.assetsInVault > 0n
+        ? [{ marketId: `privy-earn:${vaultId}`, amountUsdc: p.assetsInVault }]
+        : [];
+    } catch { return []; }
+  }
+
+  return {
+    ledger,
+    markets,
+    treasury: createPrivyTreasury({ arc, address, listPositions }),
+    proposer,
+    execution: createPrivyArcExecutor({
+      arc, privy, address,
+      settlementAddress: (optional("SETTLEMENT_ADDRESS") ?? address) as Address,
+    }),
+    policy,
+    obligations: listObligations(ledger, business.id),
+    now: () => new Date(),
+  };
 }
 
-const treasury = createPrivyTreasury({ arc, address, listPositions });
-
-const execution = createPrivyArcExecutor({
-  arc, privy, address,
-  settlementAddress: (process.env.SETTLEMENT_ADDRESS ?? address) as Address,
+const faucetKey = optional("ARC_PRIVATE_KEY");
+const faucet = faucetKey === null ? null : createFaucet({
+  rpcUrl: required("ARC_RPC_URL"),
+  chainId: ARC_TESTNET.id,
+  privateKey: faucetKey,
+  maxPerCallUsdcMinor: BigInt(process.env.FAUCET_MAX_USDC ?? "20000000"), // 20 USDC
 });
 
-const deps: OrchestratorDeps = {
-  ledger, markets, treasury,
-  proposer: createProposer({ apiKey: required("ANTHROPIC_API_KEY") }),
-  execution, policy,
-  obligations: loadObligations(process.env),
-  now: () => new Date(),
+/**
+ * Seed the wallet provisioned by hand during the spikes as a business, once.
+ *
+ * It already holds testnet USDC, so a reviewer has a funded tenant to run
+ * immediately rather than creating one and discovering the faucet is the only
+ * way forward. Onboarding a second business exercises the real path.
+ */
+function seedFirstBusiness(): void {
+  if (listBusinesses(ledger).length > 0) return;
+  const walletId = optional("PRIVY_WALLET_ID");
+  const address = optional("PRIVY_WALLET_ADDRESS");
+  if (walletId === null || address === null) return;
+
+  const b = createBusiness(ledger, {
+    id: "biz_demo",
+    name: process.env.SEED_BUSINESS_NAME ?? "Kesi Foods",
+    walletId,
+    address,
+    policyId: optional("PRIVY_POLICY_ID") ?? "provisioned-by-hand",
+  });
+  setObligations(ledger, b.id, loadObligations(process.env));
+  console.log(`seeded business ${b.name} (${b.id}) at ${b.address}`);
+}
+
+const host: TenantHost = {
+  ledger, policy, markets, provisioner, depsFor,
+  chainId: ARC_TESTNET.id,
+  perTxCeilingUsdcMinor: BigInt(process.env.WALLET_TX_CEILING_USDC ?? "10000000"), // 10 USDC
+  ...(faucet === null ? {} : { fund: (b: Business, amount: bigint) => faucet.send(b.address as Address, amount) }),
 };
 
+seedFirstBusiness();
+
 // Reconcile anything left in flight BEFORE accepting new work. D-003.
-const report = await reconcile(ledger, execution);
+// Status-only: a sweep across every business's intents needs the chain, not a
+// wallet, and must not be able to broadcast.
+const report = await reconcile(ledger, createStatusOnlyExecutor(arc));
 if (report.checked > 0) console.log("reconciled on startup:", report);
 
 const port = Number(process.env.PORT ?? 8787);
-serve({ fetch: createApp(deps).fetch, port });
-console.log(`idle-capital api on :${port}  wallet ${address}`);
+serve({ fetch: createApp(host).fetch, port });
+console.log(`idle-capital api on :${port}  ${listBusinesses(ledger).length} business(es)`);

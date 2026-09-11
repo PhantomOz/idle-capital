@@ -128,3 +128,24 @@ describe("runs scoped to a business", () => {
     expect(() => createRun(l, "r1", null, "ghost")).toThrow();
   });
 });
+
+describe("obligation ids are the business's own labels", () => {
+  /**
+   * "sep-payroll" is a name two customers will both reach for. A globally
+   * unique key made the second business's schedule fail to save.
+   */
+  it("lets two businesses use the same obligation id", () => {
+    biz("b1"); biz("b2");
+    setObligations(l, "b1", [{ ...OBLIGATION, id: "sep-payroll", amountMinor: 100n }]);
+    setObligations(l, "b2", [{ ...OBLIGATION, id: "sep-payroll", amountMinor: 200n }]);
+    expect(listObligations(l, "b1")[0]?.amountMinor).toBe(100n);
+    expect(listObligations(l, "b2")[0]?.amountMinor).toBe(200n);
+  });
+
+  it("still refuses a duplicate id within one business", () => {
+    biz("b1");
+    expect(() => setObligations(l, "b1", [
+      { ...OBLIGATION, id: "dup" }, { ...OBLIGATION, id: "dup" },
+    ])).toThrow();
+  });
+});
