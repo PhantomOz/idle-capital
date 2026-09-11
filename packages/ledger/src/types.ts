@@ -16,6 +16,8 @@ export type IntentKind = "earn_deposit" | "earn_withdraw" | "settle_usdc";
 
 export type Run = {
   id: string;
+  /** The business this run belongs to. Null on runs written before tenancy. */
+  businessId: string | null;
   status: RunStatus;
   proposal: Proposal | null;
   verdict: Verdict | null;

@@ -42,7 +42,8 @@ function fromJson<T>(s: string | null): T | null {
 }
 
 type RunRow = {
-  id: string; status: string; proposal: string | null; verdict: string | null;
+  id: string; business_id: string | null;
+  status: string; proposal: string | null; verdict: string | null;
   error: string | null;
   created_at: string; updated_at: string;
 };
@@ -50,6 +51,7 @@ type RunRow = {
 function hydrate(row: RunRow): Run {
   return {
     id: row.id,
+    businessId: row.business_id,
     status: row.status as RunStatus,
     proposal: fromJson<Proposal>(row.proposal),
     verdict: fromJson<Verdict>(row.verdict),
@@ -59,11 +61,13 @@ function hydrate(row: RunRow): Run {
   };
 }
 
-export function createRun(l: Ledger, id: string, proposal: Proposal | null): Run {
+export function createRun(
+  l: Ledger, id: string, proposal: Proposal | null, businessId: string | null = null,
+): Run {
   const now = new Date().toISOString();
   l.raw.prepare(
-    "INSERT INTO runs (id,status,proposal,verdict,created_at,updated_at) VALUES (?,?,?,?,?,?)",
-  ).run(id, "PROPOSED", proposal === null ? null : toJson(proposal), null, now, now);
+    "INSERT INTO runs (id,business_id,status,proposal,verdict,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
+  ).run(id, businessId, "PROPOSED", proposal === null ? null : toJson(proposal), null, now, now);
   return getRun(l, id)!;
 }
 
@@ -95,6 +99,14 @@ export function listRuns(l: Ledger, status?: RunStatus): Run[] {
   const rows = (status === undefined
     ? l.raw.prepare("SELECT * FROM runs ORDER BY created_at").all()
     : l.raw.prepare("SELECT * FROM runs WHERE status=? ORDER BY created_at").all(status)) as RunRow[];
+  return rows.map(hydrate);
+}
+
+/** One business's runs. Never another's — the scoping is in the query. */
+export function listRunsForBusiness(l: Ledger, businessId: string): Run[] {
+  const rows = l.raw.prepare(
+    "SELECT * FROM runs WHERE business_id=? ORDER BY created_at",
+  ).all(businessId) as RunRow[];
   return rows.map(hydrate);
 }
 

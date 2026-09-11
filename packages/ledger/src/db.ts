@@ -10,6 +10,31 @@ export type Ledger = {
 };
 
 const SCHEMA = `
+CREATE TABLE IF NOT EXISTS businesses (
+  id            TEXT PRIMARY KEY,
+  name          TEXT NOT NULL,
+  -- Provisioned at onboarding. The wallet is born with the policy attached,
+  -- so there is no row here that ever described an unguarded wallet.
+  wallet_id     TEXT NOT NULL,
+  address       TEXT NOT NULL,
+  policy_id     TEXT NOT NULL,
+  created_at    TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS obligations (
+  id           TEXT PRIMARY KEY,
+  business_id  TEXT NOT NULL REFERENCES businesses(id),
+  currency     TEXT NOT NULL,
+  -- TEXT for the same reason as every other amount in this schema.
+  amount_minor TEXT NOT NULL,
+  due_date     TEXT NOT NULL,
+  category     TEXT NOT NULL,
+  confidence   REAL NOT NULL,
+  created_at   TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_obligations_biz ON obligations(business_id, due_date);
+
 CREATE TABLE IF NOT EXISTS runs (
   id          TEXT PRIMARY KEY,
   status      TEXT NOT NULL,
@@ -63,9 +88,17 @@ export function openLedger(path = ".idle/ledger.db"): Ledger {
     raw,
     migrate() {
       raw.exec(SCHEMA);
-      // Older ledgers predate the error column. Adding it is idempotent:
-      // SQLite has no ADD COLUMN IF NOT EXISTS, so a duplicate is caught.
-      try { raw.exec("ALTER TABLE runs ADD COLUMN error TEXT"); } catch { /* already there */ }
+      // SQLite has no ADD COLUMN IF NOT EXISTS, so each of these is attempted
+      // and its duplicate-column error swallowed. Ledgers written before a
+      // column existed are still readable, which matters: this file holds the
+      // record of money that moved.
+      for (const stmt of [
+        "ALTER TABLE runs ADD COLUMN error TEXT",
+        "ALTER TABLE runs ADD COLUMN business_id TEXT REFERENCES businesses(id)",
+      ]) {
+        try { raw.exec(stmt); } catch { /* already there */ }
+      }
+      raw.exec("CREATE INDEX IF NOT EXISTS idx_runs_biz ON runs(business_id, created_at)");
     },
     close() { raw.close(); },
   };
