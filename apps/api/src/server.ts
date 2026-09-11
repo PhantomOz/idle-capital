@@ -2,7 +2,7 @@ import { serve } from "@hono/node-server";
 import { getLendingMarkets } from "@idle/yields";
 import {
   createBusiness, listBusinesses, listObligations, openLedger, reconcile,
-  setObligations, type Business,
+  setObligations, settledPositions, type Business,
 } from "@idle/ledger";
 import { createProposer } from "@idle/agent";
 import { ARC_TESTNET, createArcClient } from "@idle/chain";
@@ -85,14 +85,28 @@ function depsFor(business: Business): OrchestratorDeps {
   const privy = createPrivyClient({ appId, appSecret, walletId: business.walletId });
   const address = business.address as Address;
 
+  /**
+   * Where this business's parked capital is, from its own books.
+   *
+   * The settlement leg moves USDC out of the wallet on Arc, so the balance
+   * alone would show a business as poorer after every approved run and the
+   * kernel's conservation check (K2) would never balance. The ledger records
+   * what left under an approved decision, and that is the position.
+   *
+   * When the Earn vault reports a real deposit for this wallet, that is the
+   * better source and takes precedence — it is the venue's own answer rather
+   * than ours. On testnet it reports nothing, and we fall back to the books.
+   */
   async function listPositions(): Promise<Position[]> {
-    if (vaultId === "") return [];
-    try {
-      const p = await privy.earnPosition(vaultId);
-      return p.assetsInVault > 0n
-        ? [{ marketId: `privy-earn:${vaultId}`, amountUsdc: p.assetsInVault }]
-        : [];
-    } catch { return []; }
+    if (vaultId !== "") {
+      try {
+        const p = await privy.earnPosition(vaultId);
+        if (p.assetsInVault > 0n) {
+          return [{ marketId: `privy-earn:${vaultId}`, amountUsdc: p.assetsInVault }];
+        }
+      } catch { /* fall through to our own record */ }
+    }
+    return settledPositions(ledger, business.id);
   }
 
   return {

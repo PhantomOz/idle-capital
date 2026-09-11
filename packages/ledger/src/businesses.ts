@@ -1,4 +1,4 @@
-import type { Currency, Obligation, ObligationCategory } from "@idle/core";
+import type { Currency, Obligation, ObligationCategory, Position } from "@idle/core";
 import type { Ledger } from "./db.js";
 
 export type Business = {
@@ -90,4 +90,40 @@ export function listObligations(l: Ledger, businessId: string): Obligation[] {
     category: r.category as ObligationCategory,
     confidence: r.confidence,
   }));
+}
+
+/**
+ * What this business has committed to venues, according to its own books.
+ *
+ * Derived from confirmed intents: deposits add, withdrawals subtract. This is
+ * the treasury's internal accounting, and on this deployment it is the only
+ * record of parked capital there is — the settlement leg moves USDC out of the
+ * wallet on Arc, so a balance read alone would show the money as simply gone
+ * and the business as poorer after every successful run.
+ *
+ * It is deliberately NOT a claim that the funds are earning. What it records is
+ * that they left the liquid balance under an approved decision. The venue-side
+ * deposit is a separate step this testnet deployment does not take, and the UI
+ * says so rather than implying a yield that is not being collected.
+ */
+export function settledPositions(l: Ledger, businessId: string): Position[] {
+  const rows = l.raw.prepare(
+    `SELECT i.kind AS kind, i.market_id AS market_id, i.amount_usdc AS amount_usdc
+       FROM intents i
+       JOIN runs r ON r.id = i.run_id
+      WHERE r.business_id = ? AND i.status = 'confirmed' AND i.market_id IS NOT NULL`,
+  ).all(businessId) as { kind: string; market_id: string; amount_usdc: string }[];
+
+  const byMarket = new Map<string, bigint>();
+  for (const r of rows) {
+    const signed = r.kind === "earn_withdraw" ? -BigInt(r.amount_usdc) : BigInt(r.amount_usdc);
+    byMarket.set(r.market_id, (byMarket.get(r.market_id) ?? 0n) + signed);
+  }
+
+  return [...byMarket.entries()]
+    // A venue withdrawn back to zero is not a position, and a negative one is
+    // a bug we would rather not propagate into the kernel's conservation check.
+    .filter(([, amount]) => amount > 0n)
+    .map(([marketId, amountUsdc]) => ({ marketId, amountUsdc }))
+    .sort((a, b) => a.marketId.localeCompare(b.marketId));
 }

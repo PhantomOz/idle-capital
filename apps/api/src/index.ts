@@ -6,3 +6,4 @@ export * from "./app.js";
 export * from "./parse.js";
 export * from "./faucet.js";
 export * from "./reconciler.js";
+export * from "./schedule.js";

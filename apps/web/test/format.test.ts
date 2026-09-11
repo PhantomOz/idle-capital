@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatApy, formatLocalMinor, formatUsdCompact, formatUsdc } from "../src/format.js";
+import { daysUntil, formatApy, formatDueDate, formatLocal, formatLocalMinor, formatUsdCompact, formatUsdc, formatUsdcShort } from "../src/format.js";
 
 describe("formatUsdc", () => {
   it("renders six decimals, because exactness is the point", () => {
@@ -64,5 +64,46 @@ describe("formatLocalMinor", () => {
 describe("formatUsdCompact billions", () => {
   it("uses billions rather than four-digit millions", () => {
     expect(formatUsdCompact(-1_279_500_000)).toBe("-$1.3B");
+  });
+});
+
+describe("business-facing formatting", () => {
+  it("shows an obligation the way the business wrote it", () => {
+    expect(formatLocal("240000", "NGN")).toBe("₦2,400.00");
+    expect(formatLocal("19350", "KES")).toBe("KSh193.50");
+  });
+
+  it("falls back to the code for a currency it has no symbol for", () => {
+    expect(formatLocal("100", "XOF")).toBe("XOF1.00");
+  });
+
+  /** $3.56 beside a ledger row of 3.550000 invites the wrong question. */
+  it("truncates the headline to cents rather than rounding up", () => {
+    expect(formatUsdcShort("3559999")).toBe("$3.55");
+  });
+
+  it("formats a headline with thousands separators", () => {
+    expect(formatUsdcShort("1234567890123")).toBe("$1,234,567.89");
+  });
+
+  it("never parses a headline through a Number", () => {
+    expect(formatUsdcShort("9007199254740993000000")).toBe("$9,007,199,254,740,993.00");
+  });
+
+  it("writes a due date the way a person says it", () => {
+    expect(formatDueDate("2026-09-20")).toBe("20 Sep");
+    expect(formatDueDate("2026-10-01")).toBe("1 Oct");
+  });
+
+  it("leaves a value it cannot read as a date alone", () => {
+    expect(formatDueDate("soon")).toBe("soon");
+  });
+
+  it("counts the days to a due date", () => {
+    expect(daysUntil("2026-09-20", new Date("2026-09-11T13:00:00Z"))).toBe(9);
+  });
+
+  it("counts an overdue obligation as negative", () => {
+    expect(daysUntil("2026-09-01", new Date("2026-09-11T13:00:00Z"))).toBe(-10);
   });
 });

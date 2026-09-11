@@ -5,6 +5,7 @@ import {
   type Business, type Ledger,
 } from "@idle/ledger";
 import type { Policy } from "@idle/core";
+import { buildSchedule } from "./schedule.js";
 import type { PrivyProvisioner } from "@idle/wallet";
 import { approveRun, rejectRun, startRun, type OrchestratorDeps } from "./orchestrator.js";
 import { BadRequestError, parseBusinessName, parseFundAmount, parseObligations } from "./parse.js";
@@ -117,7 +118,9 @@ export function createApp(host: TenantHost): Hono {
       // "0 USDC" and "we could not ask" lead to opposite decisions.
       treasuryError = e instanceof Error ? e.message : "treasury unavailable";
     }
-    return c.json(jsonSafe({ business: b, treasury, treasuryError, obligations, runs }));
+    const totalUsdc = (treasury as { totalUsdc?: bigint } | null)?.totalUsdc ?? 0n;
+    const schedule = buildSchedule(obligations, host.policy, totalUsdc, new Date());
+    return c.json(jsonSafe({ business: b, treasury, treasuryError, schedule, runs }));
   });
 
   app.put("/businesses/:id/obligations", async (c) => {

@@ -126,3 +126,116 @@ td.reason { color: var(--refuse); font-size: 13px; }
 @media (max-width: 640px) { .refusal { grid-template-columns: 1fr; } }
 
 .footnote { margin: 14px 0 0; font-size: 13px; color: var(--ink-3); }
+
+/* ── Masthead, now that a business owns the page ───────────────────────── */
+.who { display: flex; align-items: baseline; gap: 14px; }
+.tagline { margin: 0; font-size: 14px; color: var(--ink-3); max-width: 44ch; }
+.addr-short { color: var(--ink-2); }
+
+button.link {
+  background: none; border: none; padding: 0; color: var(--ink-3);
+  font-size: 13px; text-decoration: underline; text-underline-offset: 3px;
+  cursor: pointer; font-weight: 400;
+}
+button.link:hover { color: var(--ink); }
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* ── First screen ──────────────────────────────────────────────────────── */
+.onboard { display: grid; gap: 44px; padding-top: 40px; max-width: 62ch; }
+.pitch h2 {
+  margin: 0 0 18px; font-size: 30px; font-weight: 600;
+  letter-spacing: -0.025em; line-height: 1.2; max-width: 19ch;
+}
+.pitch p { margin: 0 0 14px; font-size: 16px; line-height: 1.6; color: var(--ink-2); }
+
+.pick h3 { margin: 0 0 4px; font-size: 15px; font-weight: 600; }
+.pick .hint { margin: 0 0 14px; font-size: 14px; color: var(--ink-3); max-width: 52ch; }
+.biz-list { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 8px; }
+button.biz {
+  width: 100%; display: flex; justify-content: space-between; align-items: baseline;
+  gap: 18px; padding: 14px 16px; text-align: left;
+  background: var(--sheet); color: var(--ink); border: 1px solid var(--rule-hard);
+}
+button.biz:hover { border-color: var(--ink); }
+.biz-name { font-weight: 600; }
+.biz-addr { font-family: var(--mono); font-size: 12px; color: var(--ink-3); }
+
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+.row .hint { margin: 0; font-size: 13px; color: var(--ink-3); }
+input, select {
+  font: inherit; padding: 8px 12px; border: 1px solid var(--rule-hard);
+  background: var(--sheet); color: var(--ink); border-radius: 2px;
+}
+input { min-width: 220px; }
+input:focus-visible, select:focus-visible { outline: 2px solid var(--hold); outline-offset: 1px; }
+
+/* ── Funding ───────────────────────────────────────────────────────────── */
+.fund { padding: 20px 0 4px; }
+.fund-lead { margin: 0; font-size: 16px; line-height: 1.55; max-width: 58ch; color: var(--ink-2); }
+.fund-lead strong { color: var(--ink); }
+code.addr {
+  font-family: var(--mono); font-size: 13px; padding: 9px 12px;
+  background: var(--paper-band); border: 1px solid var(--rule); word-break: break-all;
+}
+
+/* ── What the business owes ────────────────────────────────────────────── */
+.schedule { padding-top: 6px; }
+.due-date { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.due-rel, .where, .maybe { display: block; font-size: 12px; color: var(--ink-3); }
+.maybe { color: var(--hold); }
+tr[data-horizon="out"] td { color: var(--ink-3); }
+
+.totals {
+  display: grid; gap: 2px; margin: 18px 0 0; padding: 0;
+  max-width: 420px; margin-left: auto;
+}
+.totals div {
+  display: flex; justify-content: space-between; align-items: baseline;
+  gap: 24px; padding: 7px 0;
+}
+.totals dt { font-size: 14px; color: var(--ink-2); }
+.totals dd {
+  margin: 0; font-family: var(--mono); font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+.totals .why { display: block; font-size: 12px; color: var(--ink-3); }
+.totals .floor { border-top: 1px solid var(--rule); }
+.totals .free { border-top: 2px solid var(--ink); }
+.totals .free dd { font-weight: 600; }
+
+.seam { margin: 16px 0 0; font-size: 12px; color: var(--ink-3); }
+
+/* ── The decision ──────────────────────────────────────────────────────── */
+.run-head { align-items: flex-start; }
+.headline {
+  margin: 0; font-size: 21px; font-weight: 600; line-height: 1.35;
+  letter-spacing: -0.015em; max-width: 44ch;
+}
+.run .rationale { font-size: 16px; color: var(--ink-2); margin: 14px 0 24px; }
+.run .run-id {
+  margin: 22px 0 0; font-family: var(--mono); font-size: 11px; color: var(--ink-3);
+}
+
+.checks { margin-top: 26px; padding-top: 18px; border-top: 1px solid var(--rule); }
+.checks-lead { margin: 0 0 10px; font-size: 14px; font-weight: 600; color: var(--hold); }
+.checks[data-vetoed="yes"] .checks-lead { color: var(--refuse); }
+.breach {
+  grid-template-columns: 1fr auto; align-items: baseline; gap: 14px;
+}
+.breach code {
+  font-size: 11px; color: var(--ink-3); font-weight: 400;
+  border: 1px solid var(--rule); padding: 1px 6px; border-radius: 2px;
+  cursor: help; white-space: nowrap;
+}
+.checks[data-vetoed="yes"] .breach code { color: var(--refuse); border-color: var(--refuse); }
+
+/* ── Editing the schedule ──────────────────────────────────────────────── */
+.obligations-form { padding-top: 8px; }
+.ledger.editable tbody tr { background: none; }
+.ledger.editable td { padding: 6px 8px 6px 0; vertical-align: middle; }
+.ledger.editable input, .ledger.editable select { min-width: 0; width: 100%; font-size: 14px; }
+.ledger.editable input[type="date"] { min-width: 150px; }

@@ -195,8 +195,36 @@ describe("GET /businesses/:id", () => {
     seed(h.ledger);
     const body = await (await h.app.request("/businesses/b1")).json();
     expect(body.business.name).toBe("Acme Trading");
-    expect(body.obligations).toHaveLength(1);
+    expect(body.schedule.obligations).toHaveLength(1);
     expect(body.treasury.totalUsdc).toBe("100000000");
+  });
+
+  /** The UI must never convert a currency or apply a multiplier itself. */
+  it("converts each obligation and states the floor, so the UI does no money math", async () => {
+    const h = harness();
+    seed(h.ledger);
+    const { schedule } = await (await h.app.request("/businesses/b1")).json();
+    // NGN 1_600_000 minor is 16,000 naira; at 1600/USD that is $10.00,
+    // which in USDC minor units is 10_000_000.
+    expect(schedule.obligations[0].usdcMinor).toBe("10000000");
+    expect(schedule.totalUsdc).toBe("10000000");
+    expect(schedule.minimumHoldUsdc).toBe("11500000"); // x 11500bps, rounded up
+    expect(schedule.deployableUsdc).toBe("88500000");  // 100.00 treasury - 11.50 floor
+  });
+
+  it("discloses the FX table it converted with", async () => {
+    const h = harness();
+    seed(h.ledger);
+    const { schedule } = await (await h.app.request("/businesses/b1")).json();
+    expect(schedule.fx.asOf).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(schedule.fx.source).toMatch(/not a live oracle/);
+  });
+
+  it("reports zero deployable rather than a negative when the treasury cannot cover the floor", async () => {
+    const h = harness({ treasuryFails: true });
+    seed(h.ledger);
+    const { schedule } = await (await h.app.request("/businesses/b1")).json();
+    expect(schedule.deployableUsdc).toBe("0");
   });
 
   /** "0 USDC" and "we could not ask" lead to opposite decisions. */

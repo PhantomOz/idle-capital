@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Obligation } from "@idle/core";
 import {
-  createBusiness, createRun, getBusiness, listBusinesses, listObligations,
-  listRuns, listRunsForBusiness, openLedger, setObligations, type Ledger,
+  createBusiness, createRun, getBusiness, listBusinesses, listIntents, listObligations,
+  listRuns, listRunsForBusiness, markConfirmed, markSubmitted, materialiseIntents,
+  openLedger, setObligations, settledPositions, type Ledger,
 } from "../src/index.js";
 
 let l: Ledger;
@@ -147,5 +148,55 @@ describe("obligation ids are the business's own labels", () => {
     expect(() => setObligations(l, "b1", [
       { ...OBLIGATION, id: "dup" }, { ...OBLIGATION, id: "dup" },
     ])).toThrow();
+  });
+});
+
+describe("settledPositions", () => {
+  function settle(runId: string, businessId: string, specs: { kind: "earn_deposit" | "earn_withdraw"; amountUsdc: bigint; marketId: string }[]) {
+    createRun(l, runId, null, businessId);
+    materialiseIntents(l, runId, specs);
+    for (const i of listIntents(l, runId)) {
+      markSubmitted(l, i.id, `0x${i.id}`);
+      markConfirmed(l, i.id);
+    }
+  }
+
+  /**
+   * The settlement leg moves USDC out of the wallet, so a balance read alone
+   * shows the business as poorer after every successful run. Its own books are
+   * the record of where that money went.
+   */
+  it("counts a confirmed deposit as a position", () => {
+    biz("b1");
+    settle("r1", "b1", [{ kind: "earn_deposit", amountUsdc: 3_550_000n, marketId: "privy-earn:v" }]);
+    expect(settledPositions(l, "b1")).toEqual([{ marketId: "privy-earn:v", amountUsdc: 3_550_000n }]);
+  });
+
+  it("nets a withdrawal against an earlier deposit", () => {
+    biz("b1");
+    settle("r1", "b1", [{ kind: "earn_deposit", amountUsdc: 5_000_000n, marketId: "privy-earn:v" }]);
+    settle("r2", "b1", [{ kind: "earn_withdraw", amountUsdc: 2_000_000n, marketId: "privy-earn:v" }]);
+    expect(settledPositions(l, "b1")[0]?.amountUsdc).toBe(3_000_000n);
+  });
+
+  it("drops a venue withdrawn back to zero rather than reporting an empty position", () => {
+    biz("b1");
+    settle("r1", "b1", [{ kind: "earn_deposit", amountUsdc: 1_000_000n, marketId: "privy-earn:v" }]);
+    settle("r2", "b1", [{ kind: "earn_withdraw", amountUsdc: 1_000_000n, marketId: "privy-earn:v" }]);
+    expect(settledPositions(l, "b1")).toEqual([]);
+  });
+
+  /** An intent that never confirmed is not money that moved. */
+  it("ignores intents that are still in flight", () => {
+    biz("b1");
+    createRun(l, "r1", null, "b1");
+    materialiseIntents(l, "r1", [{ kind: "earn_deposit", amountUsdc: 9n, marketId: "privy-earn:v" }]);
+    expect(settledPositions(l, "b1")).toEqual([]);
+  });
+
+  it("keeps one business's positions out of another's", () => {
+    biz("b1"); biz("b2");
+    settle("r1", "b1", [{ kind: "earn_deposit", amountUsdc: 1_000_000n, marketId: "privy-earn:v" }]);
+    expect(settledPositions(l, "b2")).toEqual([]);
   });
 });
