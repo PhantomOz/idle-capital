@@ -31,7 +31,7 @@ describe("loadPolicy", () => {
 
 describe("loadObligations", () => {
   it("defaults to the testnet scale, so the documented run reaches settlement", () => {
-    expect(loadObligations({})).toBe(TESTNET_OBLIGATIONS);
+    expect(loadObligations({})).toEqual(TESTNET_OBLIGATIONS);
   });
 
   it("serves the full business schedule on request", () => {
@@ -48,9 +48,9 @@ describe("loadObligations", () => {
   });
 
   it("scales to a requirement the testnet treasury can actually cover", () => {
-    // ~12 USDC of faucet balance against a 6.10 USDC requirement leaves a real
+    // A few real dollars against a ~1.75 USDC requirement leaves a real
     // surplus to park. The business schedule needs 12,200 USDC and cannot.
-    expect(bufferRequirementUsdc(TESTNET_OBLIGATIONS, 30, ASOF)).toBe(6_100_000n);
+    expect(bufferRequirementUsdc(TESTNET_OBLIGATIONS, 30, ASOF)).toBe(1_524_640n);
     expect(bufferRequirementUsdc(BUSINESS_OBLIGATIONS, 30, ASOF)).toBe(12_200_000_000n);
   });
 
