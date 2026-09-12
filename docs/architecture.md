@@ -3,8 +3,8 @@
 Idle Capital decides how much of a business's working capital must stay liquid
 against forward obligations, and where the surplus goes. It reads live lending
 rates from The Graph, proposes an allocation with a language model, validates
-that proposal against a deterministic policy kernel, and settles the result
-through a policy-bound Privy wallet onto Arc.
+that proposal against a deterministic policy kernel, and deposits the result
+through a policy-bound Privy wallet into a Morpho vault on Base.
 
 This document describes how it is built and why. Decisions carrying a `D-0NN`
 reference are recorded in [`DECISIONS.md`](../DECISIONS.md).
@@ -36,7 +36,7 @@ flowchart LR
         A["Claude<br/>forced tool call"]
     end
     subgraph L2["Layer 2 — validates"]
-        K["Policy kernel<br/>K1-K8, deterministic"]
+        K["Policy kernel<br/>K1-K9, deterministic"]
     end
     subgraph L3["Layer 3 — enforces"]
         P["Privy wallet policy<br/>server-side, off-box"]
@@ -47,7 +47,7 @@ flowchart LR
     K -.->|vetoed| X["No intent is ever created"]
     K -.->|escalated| H["Human approval queue"]
     H -->|approved| P
-    P -->|signature| ARC["Arc settlement"]
+    P -->|signature| ARC["Privy Earn<br/>Morpho vault, Base"]
     P -.->|refused| Y["Nothing moves.<br/>Costs nothing — we sign before we broadcast"]
 ```
 
@@ -79,7 +79,7 @@ sequenceDiagram
     participant AI as Claude
     participant K as Kernel
     participant L as Ledger (SQLite)
-    participant AC as Arc
+    participant AC as Earn vault
 
     U->>O: POST /runs
     O->>L: create run (before the proposal exists)
@@ -96,7 +96,7 @@ sequenceDiagram
     O->>K: validate(proposal, state, policy)
 
     alt vetoed
-        K-->>O: breach (K1-K4, K8)
+        K-->>O: breach (K1-K4, K8, K9)
         O->>L: FAILED — zero intents created
     else escalated
         K-->>O: breach (K5-K7)
@@ -145,11 +145,11 @@ flowchart TD
     api --> chain
     api --> obligations
     agent["@idle/agent<br/>prompt + defensive parse"] --> core
-    kernel["@idle/kernel<br/>K1-K8"] --> core
+    kernel["@idle/kernel<br/>K1-K9"] --> core
     yields["@idle/yields<br/>The Graph"] --> core
     obligations["@idle/obligations<br/>FX + buffer"] --> core
     wallet["@idle/wallet<br/>Privy"] --> chain
-    chain["@idle/chain<br/>Arc"] --> core
+    chain["@idle/chain<br/>Base + Arc units"] --> core
     ledger["@idle/ledger<br/>SQLite, state machine"] --> core
     core["@idle/core<br/>types + money"]
 ```
@@ -159,10 +159,10 @@ flowchart TD
 | `@idle/core` | Types and money primitives. `bigint` minor units, ratios in basis points, `divCeil` and `applyBpsCeil` round **up** | Under-reserving is the unsafe direction, so every conversion rounds against us |
 | `@idle/obligations` | Fixed FX table, buffer requirement, per-currency schedule | `confidence` never scales the amount — a 10%-likely payroll still needs the cash on the day |
 | `@idle/yields` | 26 Messari standardized lending subgraphs, one query document, normalization | Fails closed on Graph errors; no fixtures, no cache (D-007). Quorum of 5 protocols or the run fails (D-009) |
-| `@idle/kernel` | K1–K8, veto/escalate split | Vetoes evaluated first and win outright. The whole validator is wrapped so a throw degrades to a veto |
+| `@idle/kernel` | K1–K9, veto/escalate split | Vetoes evaluated first and win outright. The whole validator is wrapped so a throw degrades to a veto |
 | `@idle/agent` | Prompt construction, forced tool schema, defensive parse | Returns `null` for anything unusable rather than repairing it |
 | `@idle/ledger` | SQLite run/intent store, state machine, reconciliation | Money stored as TEXT, not INTEGER — 2^53 is not enough |
-| `@idle/chain` | Arc client. USDC is the **native** gas token; settlement is a value transfer | Pending nonce, so a multi-intent run does not collide with itself |
+| `@idle/chain` | Base USDC reader (6dp, no scaling) and the Arc client it replaced (native USDC, 18dp, scaled by 10^12). Both kept because the unit difference is the trap: the same asset, the same name, different decimals | Each client owns its own conversion, behind one structural seam |
 | `@idle/wallet` | Privy server wallet, policy, Earn vault | Signs *before* broadcasting, so a policy refusal costs nothing (D-014) |
 | `apps/api` | Orchestrator, ports, HTTP | Every port is real in `server.ts`; the fakes live only in tests |
 | `apps/web` | Ledger-sheet UI | Restructured so the refusal is the headline, not row 47 (D-013); rebuilt again around the decision rather than the machinery (D-023) |
@@ -184,6 +184,7 @@ it is about **who can legitimately overrule it**.
 | K5 | No venue holds more than 50% of parked capital | ESCALATE | Concentration is a risk appetite question — a human may accept it |
 | K6 | Churn this run is under the movement ceiling | ESCALATE | Bounds the blast radius of one bad decision, whoever made it |
 | K7 | Every target venue is above the liquidity floor | ESCALATE | Yield on capital you cannot withdraw is not yield |
+| K9 | Every target venue earns ≥ `minNetYieldBps` over the buffer horizon | **VETO** | K1–K8 all passed a proposal that parked capital at 0.003% APY against a 0.005 USDC round trip. None of them asked whether the trade was worth making (D-025) |
 | K8 | The proposal is structurally well-formed | **VETO** | Takes `unknown` deliberately — TypeScript types are erased at runtime |
 
 Three properties worth stating explicitly:
@@ -280,12 +281,11 @@ is the complete list.
 |---|---|---|
 | Lending rates and liquidity | **Live** | 26 Messari standardized subgraphs on The Graph's decentralized network, queried per run. No fixtures, no cache, no fallback |
 | Earn vault APY, liquidity, position | **Live** | Privy Earn API |
-| Treasury balance | **Live** | Arc testnet, native USDC |
-| Settlement | **Live** | Signed by Privy, broadcast to Arc, receipts confirmed |
+| Treasury balance | **Live** | USDC on Base mainnet, read from the token contract |
+| Deposit / withdrawal | **Live** | Privy Earn into Steakhouse Prime USDC (Morpho, Base). Real USDC |
 | **FX rates** | **Fixed table** | Documented in `packages/obligations/src/fx.ts` with an `asOf` date and a `source` string surfaced in the UI. Swapping in an oracle means replacing one object |
 | **Obligations** | **Fixture** | Company data — there is no feed to read it from, and every treasury system takes it as input. Two schedules ship: the business's real one, and a 1/2000 testnet scaling (D-020) |
-| **Arc** | **Testnet** | chainId 5042002 |
-| **Earn deposit execution** | **Not exercised** | The vault is Base mainnet with real USDC. It is read live and targeted by allocations; the settlement leg runs on Arc |
+| **Venue reachability** | **One venue** | 104 markets are compared; one can be deposited into. The rest are the opportunity-cost benchmark K9 measures against, not destinations |
 
 The Graph layer fails **closed** (D-007). If the gateway errors, or fewer than
 five protocols answer, the run fails rather than proceeding on partial data. A
@@ -336,7 +336,7 @@ A sort had silently decided what the agent was allowed to consider (D-018).
 | `GET` | `/businesses` | Every business |
 | `GET` | `/businesses/:id` | One business: treasury, schedule, runs |
 | `PUT` | `/businesses/:id/obligations` | Replace the forward schedule |
-| `POST` | `/businesses/:id/fund` | Testnet faucet into that business's wallet |
+| `POST` | `/businesses/:id/fund` | Answers 501. Mainnet has no faucet; the response names the address to send USDC to |
 | `POST` | `/businesses/:id/runs` | Start a run for that business |
 | `GET` | `/businesses/:id/runs` | That business's runs, and no other's |
 | `GET` | `/runs/:id` | One run with its intents |
@@ -359,7 +359,7 @@ sequenceDiagram
     participant U as Operator
     participant API as Idle Capital
     participant PV as Privy
-    participant AC as Arc
+    participant AC as Earn vault
 
     U->>API: POST /businesses {name}
     API->>PV: create policy (ceiling, chain)
@@ -396,7 +396,7 @@ customer to save a schedule got a constraint violation.
 
 ### Where parked capital lives
 
-The settlement leg moves USDC out of the wallet on Arc, so a balance read alone
+A deposit moves USDC out of the wallet into the vault, so a balance read alone
 would show a business as *poorer* after every approved run, and K2's
 conservation check would never balance. Positions are therefore derived from
 the business's own confirmed intents — deposits add, withdrawals subtract —
@@ -416,9 +416,10 @@ implying a yield nobody is collecting.
 - **No retry loop around the agent.** A failed run is a recorded fact; the
   operator starts another. Automatic retries against a paid API with money at
   the end are a way to spend both without noticing.
-- **No private key for the treasury wallet.** Anywhere. Privy signs (D-014).
-  The one key in this repo belongs to the faucet EOA and is used for funding
-  and refunding only.
+- **No private key, anywhere.** Privy signs every movement (D-014). The one key
+  this repo ever used belonged to the Arc faucet, and that faucet is gone with
+  the chain it funded — mainnet has no tap, so funding is an operator action and
+  the code holds no secret that can move money.
 - **No authentication.** Anyone who reaches the API can open any business. A
   demo, and disclosed as one: tenancy here is about isolating treasuries from
   each other's decisions, not about defending them from an attacker who already

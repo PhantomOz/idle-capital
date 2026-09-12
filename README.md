@@ -7,7 +7,8 @@ the surplus goes.
 
 It reads live lending rates from **The Graph**, proposes an allocation with
 **Claude**, validates that proposal against a deterministic policy kernel, and
-settles through a policy-bound **Privy** wallet onto **Arc**.
+deposits through a policy-bound **Privy** wallet into a **Morpho** vault on
+**Base** — real USDC, real yield.
 
 > **Every rate in this system is live.** The Graph query layer has no fixtures,
 > no cache and no fallback — if the gateway fails, the run fails. §[Disclosed
@@ -35,8 +36,15 @@ Kernel           K5 ESCALATED — all of the surplus in one venue
                  zero intents created; nothing moves
 [Approve]
 Privy            that business's wallet signs; no private key in this process
-Arc              2.70 USDC settled, confirmed
+Earn vault       2.70 USDC deposited into Steakhouse Prime USDC, 3.96% APY
 ```
+
+The agent also refuses. `K9` vetoes a venue that cannot earn its keep over the
+horizon to the next obligation — which is what the six ERC-4626 vaults on Arc
+testnet turned out to be, every one of them paying between 0.000% and 0.003%
+([D-024](DECISIONS.md)). Parking there would have cost more in gas than it
+earned, and for a week this project did exactly that while `K1`–`K8` all
+passed.
 
 Two businesses, two wallets, two treasuries, no shared state:
 
@@ -67,7 +75,7 @@ See [`docs/architecture.md` §8](docs/architecture.md#8-data-sources-and-the-sea
 
 - **Node ≥ 22** (uses `--env-file-if-exists`)
 - **pnpm 10**
-- Credentials for The Graph, Anthropic, Privy and an Arc testnet RPC
+- Credentials for The Graph, Anthropic, Privy and a Base mainnet RPC
 
 ### 1. Install
 
@@ -90,19 +98,22 @@ defaults are:
 | `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com) |
 | `PRIVY_APP_ID`, `PRIVY_APP_SECRET` | [dashboard.privy.io](https://dashboard.privy.io) → app settings |
 | `PRIVY_WALLET_ID`, `PRIVY_WALLET_ADDRESS` | `POST /v1/wallets` — a server wallet |
-| `ARC_RPC_URL` | Arc testnet RPC (chainId 5042002) |
+| `BASE_RPC_URL` | Base mainnet RPC. `https://mainnet.base.org` works |
+| `PRIVY_EARN_VAULT_ID` | The vault the agent may deposit into. `.env.example` ships the Steakhouse Prime USDC id |
+| `PRIVY_EARN_VAULT_ADDRESS` | That vault's contract address — needed at *onboarding*, because a Privy policy denies by default and a wallet provisioned without it allowlisted cannot deposit anywhere |
 
-Optional but recommended:
+Optional:
 
 | Variable | Effect |
 |---|---|
-| `PRIVY_EARN_VAULT_ID` | The Earn vault. Without it nothing can be parked and the agent works a fully liquid treasury |
-| `SETTLEMENT_ADDRESS` | Settlement counterparty. Defaults to the treasury wallet, which makes every settlement a self-transfer — set it to another account you control |
 | `OBLIGATIONS` | `testnet` (default) or `business`. See [below](#the-two-obligation-schedules) |
 | `PROTOCOL_ALLOWLIST` | Venues that may receive funds. Defaults to `privy-earn` |
+| `MIN_NET_YIELD_BPS` | `K9`'s floor, in bps of the amount deployed over the buffer horizon. Default 5 |
 
-The treasury wallet needs a testnet USDC balance on Arc. USDC is the **native**
-gas token there, so the balance is the account balance.
+The treasury wallet needs **USDC on Base mainnet**. There is no faucet and no
+testnet mode: the venue is a real Morpho vault, so the money is real. Send USDC
+to the wallet address and `POST /businesses/:id/fund` will tell you so (501) if
+you ask it to do the job for you.
 
 ### 3. Start the backend
 
@@ -144,8 +155,8 @@ BID=$(curl -s -X POST localhost:8787/businesses \
   -H 'content-type: application/json' \
   -d '{"name":"Bahari Logistics"}' | jq -r .business.id)
 
-curl -s -X POST localhost:8787/businesses/$BID/fund \
-  -H 'content-type: application/json' -d '{"amountUsdc":"5000000"}'
+# Fund it yourself — send USDC on Base to the address the call above returned.
+# There is no faucet; this endpoint answers 501 and says so.
 
 curl -s -X PUT localhost:8787/businesses/$BID/obligations \
   -H 'content-type: application/json' -d '{"obligations":[
@@ -158,20 +169,18 @@ curl -s -X POST localhost:8787/runs/<run-id>/approve | jq '.intents'
 
 ### Running the demo more than once
 
-The settlement leg is a real transfer to a real counterparty, so repeated runs
-drain the treasury below its own buffer requirement. Send it back:
-
-```bash
-pnpm demo:refund
-```
+A deposit is reversible: the agent withdraws from the vault whenever the target
+allocation drops below the current position, and `deriveIntents` emits
+withdrawals before deposits so capital is freed before it is redeployed. Lower
+the obligations, run again, and the surplus comes back out of the vault.
 
 ---
 
 ## Verify it yourself
 
 ```bash
-pnpm test        # 274 passing, 4 skipped
-pnpm typecheck   # 11 projects, strict
+pnpm test        # 391 passing, 4 skipped
+pnpm typecheck   # 10 projects, strict
 ```
 
 The skipped tests are live-credential integration tests. Run them with a
@@ -221,7 +230,8 @@ repo's history.
 ### The two obligation schedules
 
 The business owes about **$12,200** over 30 days. The treasury this build
-controls is a testnet faucet balance of about **12 USDC**.
+controls is whatever real USDC you fund it with — tens of dollars, not tens of
+thousands.
 
 Against the real schedule the agent is correct to park nothing, on every run,
 forever — so the demo would prove the buffer invariant and nothing else. The
@@ -242,11 +252,24 @@ Everything in this system that is not live, in full:
 |---|---|
 | Lending rates and liquidity | **Live** — 26 Messari standardized subgraphs, queried per run |
 | Earn vault APY, liquidity, position | **Live** — Privy Earn API |
-| Treasury balance, settlement | **Live** — Arc testnet, signed by Privy |
+| Treasury balance | **Live** — USDC on Base mainnet, read from the token contract |
+| Deposit and withdrawal | **Live** — Privy Earn into Steakhouse Prime USDC (Morpho, Base). Real USDC; the position figure is the vault's, not ours |
+| Wallet policy enforcement | **Live** — Privy refused an over-ceiling signature under test |
 | FX rates | **Fixed table** with an `asOf` date and a source string, surfaced in the UI |
 | Obligations | **Fixture** — company data; there is no feed to read it from |
-| Arc | **Testnet**, chainId 5042002 |
-| Earn deposit execution | **Not exercised** — the vault is Base mainnet with real USDC. It is read live and targeted by allocations; the settlement leg runs on Arc |
+| Venue reachability | **One venue.** The agent compares 104 markets across six chains but may only deposit into the one it can reach. The other 103 are the opportunity-cost benchmark — which is what `K9` measures against — not destinations |
+
+The 103 are load-bearing even though they are unreachable: strip The Graph out
+and the agent has no way to know whether 3.96% is generous or insulting, and no
+basis to refuse a venue paying 0.003%. The comparison *is* the reasoning.
+
+**What was here before, and was not true:** until [D-024](DECISIONS.md) this
+table claimed settlement on Arc. Every intent — deposit and withdrawal alike —
+was a 21,000-gas value transfer to `SETTLEMENT_ADDRESS`, which was the faucet
+account that funded the tenants. Parked capital went faucet → wallet → faucet and
+the UI called it *"moved into the USDC earn account."* It is recorded here
+because a disclosed-seams table that only ever grew more flattering would not be
+worth reading.
 
 ---
 
@@ -256,7 +279,7 @@ Everything in this system that is not live, in full:
 |---|---|
 | `docs/architecture.md` | How it is built and why, with diagrams |
 | `docs/architecture.md` §11 | Tenancy: how a business gets a wallet nothing else can spend |
-| `DECISIONS.md` | Twenty architectural calls, each with its reasoning |
+| `DECISIONS.md` | Twenty-six architectural calls, each with its reasoning |
 | `ATTRIBUTION.md` | Which files are AI-generated or AI-assisted, per file |
 | `specs/` | Every spec, versioned as it changed |
 | `specs/spikes/` | The two spikes that de-risked the build, with their findings |

@@ -490,3 +490,117 @@ the kernel ran — but the sentence leads.
 
 **How it was found:** not by review. The person it was built for looked at it
 and could not tell who it was for or when the agent did anything.
+
+---
+
+## D-024 — Execution moves to a venue that exists
+
+**Date:** 2026-09-12 · **Status:** Adopted
+
+The treasury lives on Base mainnet. The one venue the agent may deposit into is
+Privy Earn's **Steakhouse Prime USDC** vault — Morpho, Base, 3.96% APY,
+$428.7M TVL — reached through `earnDeposit` / `earnWithdraw`. Arc is no longer
+in the execution path, and the three Arc prize tracks are no longer claimed.
+
+**Why:** the previous executor implemented *every* intent as a plain
+21,000-gas value transfer to `SETTLEMENT_ADDRESS`, and `SETTLEMENT_ADDRESS` was
+the faucet EOA — the same account that funded the tenants. Parked capital went
+faucet → tenant wallet → faucet, a closed circle, and the UI described the round
+trip as *"moved $2.70 into the USDC earn account."* The venue the agent had
+actually selected was on Base and was never touched. The `marketId` on the
+intent was ignored entirely, which is the mechanism: an allocation to a Base
+vault could become a transfer on Arc because nothing checked that the executor
+could reach what the proposal named.
+
+Three facts, established by measurement rather than argument, decided where to
+go instead:
+
+1. **Arc testnet has no yielding venue.** All six ERC-4626 USDC/USDT vaults
+   discoverable on it were read at two blocks 12.2 days apart. Share prices:
+   five unchanged, one moved `1001691 → 1001692`. Realised APY 0.000%–0.003%.
+   They are functional shells with no yield source behind them.
+2. **The Graph cannot supply Arc data.** The 104 markets come from 26 Messari
+   deployments across six chains — 86 Ethereum, 7 Arbitrum, 4 Optimism, 3 Base,
+   2 Avalanche, 2 BSC. None on Arc, and none addable: The Graph does not index
+   it. The agent was comparing venues the treasury could not reach, then
+   "executing" on a chain where none of them existed.
+3. **Privy Earn was never blocked.** The spike recorded it as *"Morpho, on
+   Ethereum"* and *"blocked on one Privy Dashboard action by the operator."*
+   Both were wrong. It is Morpho on **Base**, and a deposit probe returns
+   `Insufficient balance` — the request validated and failed only on funds. The
+   endpoint had been available all along, and `earnDeposit`/`earnWithdraw` had
+   been implemented and never called since the day they were written.
+
+What this costs: the Arc tracks, and the faucet. Mainnet has no tap, so
+`POST /businesses/:id/fund` answers 501 with the address to send to. What it
+buys: the sentence *"moved into the earn account"* is now true.
+
+**What it does not claim.** The vault's source is Morpho's and the position
+figure is Privy's, not ours — the settled run says so. And Arc's own mainnet
+launches 2026-09-16 with Aave, Morpho and Maple; the venue adapter is a seam, so
+returning to Arc later is a registry entry, not a rewrite.
+
+---
+
+## D-025 — K9: a venue must be worth the trip
+
+**Date:** 2026-09-12 · **Status:** Adopted
+
+A venue must be expected to earn at least `minNetYieldBps` of the amount
+deployed over `bufferHorizonDays`, or the proposal is vetoed. Default 5 bps over
+30 days — an APY floor of about 0.61%.
+
+**Why:** K1 through K8 all passed the Arc proposals. Every one of them was
+conservative, conserved, allowlisted, diversified, within the churn ceiling and
+above the liquidity floor — and parked capital into a vault paying 0.003% while
+the round trip cost 0.005 USDC in gas. Value-destruction by roughly four orders
+of magnitude, and not one invariant objected, because none of them asked whether
+the trade was worth making at all. The kernel could prove the money was *safe*
+and had no opinion on whether moving it was *sane*.
+
+**Why a rate and not a sum.** An absolute floor cannot work at both ends of the
+range: $0.01 vetoes the entire demo at $20 of treasury, and is noise at $20m.
+5 bps binds identically at either scale.
+
+**Why a veto rather than an escalation.** The floor is the operator's own
+policy, so a proposal beneath it is out of policy, not a judgment call — the
+same reason K4 vetoes. Asking a human to approve a knowingly-losing trade is
+how a guardrail decays into a habit of clicking through.
+
+---
+
+## D-026 — The wallet policy guards destinations, because the amount left the value field
+
+**Date:** 2026-09-12 · **Status:** Adopted
+
+A provisioned wallet's policy allowlists the contracts it may call — the vault
+and USDC, plus anything the operator adds — and caps `approve`'s amount with an
+`ethereum_calldata` condition carrying an inline ABI.
+
+**Why:** the old envelope was one rule: `eth_signTransaction` where
+`chain_id == 5042002` and `value <= ceiling`. Two separate problems with that on
+Base.
+
+First, it authorises nothing there. Privy's policy engine denies by default —
+*"if no rules resolve, the policy will default to DENY"* — so a chain-pinned
+rule for Arc is not merely unhelpful off Arc, it is a closed door. Every
+existing tenant wallet would have refused its first Base operation.
+
+Second, and subtler: on Arc USDC *was* the native gas token, so a transfer's
+amount sat in the transaction's `value` field and `value <= ceiling` genuinely
+bound it. On Base, USDC is an ERC-20: every deposit carries `value: 0` and the
+amount lives in calldata. Ported unchanged, the ceiling would have been
+vacuously true for any sum whatsoever — a control that still reads like a
+control in the policy JSON and binds nothing. Capping `approve` restores the
+bound from the other end, since a vault can only pull what it was approved for.
+
+The unit flips with it, which is the kind of detail that costs real money:
+`approve`'s argument is in USDC's own six decimals — the ledger's minor unit, so
+it passes through unscaled — while the native-value rule is still denominated in
+18 and is still scaled. The same ceiling, written two ways, one line apart.
+
+Destination allowlisting carries the other half because it survives whatever
+calldata Privy chooses to emit. `extraDestinations` exists because Privy
+performs the approval and the deposit itself: if it routes either through a
+helper contract, widening the list is an operator config change rather than a
+code change — and with deny-by-default, guessing too tightly fails closed.
