@@ -5,16 +5,15 @@ import {
   setObligations, settledPositions, type Business,
 } from "@idle/ledger";
 import { createProposer } from "@idle/agent";
-import { ARC_TESTNET, createArcClient } from "@idle/chain";
+import { BASE_MAINNET, BASE_USDC, createBaseUsdcClient } from "@idle/chain";
 import {
-  createPrivyArcExecutor, createPrivyClient, createPrivyProvisioner, createPrivyTreasury,
+  createPrivyClient, createPrivyEarnExecutor, createPrivyProvisioner, createPrivyTreasury,
 } from "@idle/wallet";
 import type { Address } from "viem";
 import type { Market, Position } from "@idle/core";
 import { createApp, type TenantHost } from "./app.js";
 import { loadPolicy } from "./config.js";
-import { createFaucet } from "./faucet.js";
-import { createStatusOnlyExecutor } from "./reconciler.js";
+import { createStatusOnlyEarnExecutor } from "./reconciler.js";
 import { loadObligations } from "./obligations-fixture.js";
 import type { MarketsPort, OrchestratorDeps } from "./index.js";
 
@@ -33,8 +32,17 @@ const ledger = openLedger(process.env.LEDGER_PATH ?? ".idle/ledger.db");
 
 const appId = required("PRIVY_APP_ID");
 const appSecret = required("PRIVY_APP_SECRET");
-const arc = createArcClient(required("ARC_RPC_URL"));
-const vaultId = optional("PRIVY_EARN_VAULT_ID") ?? "";
+const base = createBaseUsdcClient(required("BASE_RPC_URL"), BASE_USDC);
+
+/**
+ * The one venue this deployment can actually execute against.
+ *
+ * Required, not optional. It used to be optional, and with it unset the agent
+ * still produced allocations and the executor still "settled" them — as plain
+ * transfers to an address we owned. A deployment with no reachable venue should
+ * refuse to start, not invent one. D-024.
+ */
+const vaultId = required("PRIVY_EARN_VAULT_ID");
 const proposer = createProposer({ apiKey: required("ANTHROPIC_API_KEY") });
 const provisioner = createPrivyProvisioner({ appId, appSecret });
 
@@ -52,7 +60,7 @@ const markets: MarketsPort = {
       assetSymbols: ["USDC", "USDT", "DAI"],
     });
     const out: Market[] = [...res.markets];
-    if (vaultId !== "") {
+    {
       try {
         const v = await sharedPrivy.earnVault(vaultId);
         out.push({
@@ -98,39 +106,41 @@ function depsFor(business: Business): OrchestratorDeps {
    * than ours. On testnet it reports nothing, and we fall back to the books.
    */
   async function listPositions(): Promise<Position[]> {
-    if (vaultId !== "") {
-      try {
-        const p = await privy.earnPosition(vaultId);
-        if (p.assetsInVault > 0n) {
-          return [{ marketId: `privy-earn:${vaultId}`, amountUsdc: p.assetsInVault }];
-        }
-      } catch { /* fall through to our own record */ }
+    try {
+      const p = await privy.earnPosition(vaultId);
+      if (p.assetsInVault > 0n) {
+        return [{ marketId: `privy-earn:${vaultId}`, amountUsdc: p.assetsInVault }];
+      }
+      // A readable vault reporting nothing means nothing is parked. Believe it.
+      return [];
+    } catch {
+      // Only an UNREADABLE vault falls back to our own books, and only so a
+      // Privy outage does not make a business look like it lost its position.
+      return settledPositions(ledger, business.id);
     }
-    return settledPositions(ledger, business.id);
   }
 
   return {
     ledger,
     markets,
-    treasury: createPrivyTreasury({ arc, address, listPositions }),
+    treasury: createPrivyTreasury({ balances: base, address, listPositions }),
     proposer,
-    execution: createPrivyArcExecutor({
-      arc, privy, address,
-      settlementAddress: (optional("SETTLEMENT_ADDRESS") ?? address) as Address,
-    }),
+    execution: createPrivyEarnExecutor({ privy, vaultId }),
     policy,
     obligations: listObligations(ledger, business.id),
     now: () => new Date(),
   };
 }
 
-const faucetKey = optional("ARC_PRIVATE_KEY");
-const faucet = faucetKey === null ? null : createFaucet({
-  rpcUrl: required("ARC_RPC_URL"),
-  chainId: ARC_TESTNET.id,
-  privateKey: faucetKey,
-  maxPerCallUsdcMinor: BigInt(process.env.FAUCET_MAX_USDC ?? "20000000"), // 20 USDC
-});
+/**
+ * There is no faucet.
+ *
+ * The treasury now holds real USDC on Base mainnet, and mainnet has no tap.
+ * `POST /businesses/:id/fund` answers 501 with the address to send to, which is
+ * the honest answer: funding a treasury is an operator action. The Arc faucet
+ * that used to live here only ever moved testnet balances between two accounts
+ * we controlled.
+ */
 
 /**
  * Seed the wallet provisioned by hand during the spikes as a business, once.
@@ -158,9 +168,10 @@ function seedFirstBusiness(): void {
 
 const host: TenantHost = {
   ledger, policy, markets, provisioner, depsFor,
-  chainId: ARC_TESTNET.id,
+  chainId: BASE_MAINNET.id,
   perTxCeilingUsdcMinor: BigInt(process.env.WALLET_TX_CEILING_USDC ?? "10000000"), // 10 USDC
-  ...(faucet === null ? {} : { fund: (b: Business, amount: bigint) => faucet.send(b.address as Address, amount) }),
+  vaultAddress: required("PRIVY_EARN_VAULT_ADDRESS") as Address,
+  usdcAddress: BASE_USDC,
 };
 
 seedFirstBusiness();
@@ -168,7 +179,10 @@ seedFirstBusiness();
 // Reconcile anything left in flight BEFORE accepting new work. D-003.
 // Status-only: a sweep across every business's intents needs the chain, not a
 // wallet, and must not be able to broadcast.
-const report = await reconcile(ledger, createStatusOnlyExecutor(arc));
+const report = await reconcile(ledger, createStatusOnlyEarnExecutor({
+  ledger,
+  clientFor: (walletId) => createPrivyClient({ appId, appSecret, walletId }),
+}));
 if (report.checked > 0) console.log("reconciled on startup:", report);
 
 const port = Number(process.env.PORT ?? 8787);

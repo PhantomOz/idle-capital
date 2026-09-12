@@ -38,6 +38,16 @@ export type TenantHost = {
   fund?(business: Business, amountUsdcMinor: bigint): Promise<string>;
   chainId: number;
   perTxCeilingUsdcMinor: bigint;
+  /**
+   * The venue a newly provisioned wallet is permitted to move capital into.
+   *
+   * Onboarding has to know this: Privy policies deny by default, so a wallet
+   * provisioned without its vault in the allowlist cannot deposit anywhere, and
+   * a wallet provisioned without an allowlist at all could deposit anywhere.
+   */
+  vaultAddress: string;
+  /** The USDC contract a newly provisioned wallet may approve. */
+  usdcAddress: string;
   newId?(prefix: string): string;
 };
 
@@ -93,6 +103,8 @@ export function createApp(host: TenantHost): Hono {
         name,
         perTxCeilingUsdcMinor: host.perTxCeilingUsdcMinor,
         chainId: host.chainId,
+        vaultAddress: host.vaultAddress as `0x${string}`,
+        usdcAddress: host.usdcAddress as `0x${string}`,
       });
       const b = createBusiness(host.ledger, { id: newId("biz"), name, ...wallet });
       return c.json(jsonSafe({ business: b }), 201);

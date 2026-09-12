@@ -4,22 +4,23 @@ import type { BusinessView } from "./api.js";
 /**
  * What to do with an address that has nothing in it.
  *
- * Onboarding hands back a real, empty wallet. Without this, the product
- * dead-ends at the exact moment it starts being interesting — so the demo
- * faucet is offered here, and labelled as what it is.
+ * Onboarding hands back a real, empty wallet, and without this the product
+ * dead-ends at the moment it starts being interesting.
+ *
+ * There is no longer a funding button. The treasury holds real USDC on Base
+ * mainnet, and mainnet has no tap — so the honest affordance is the address and
+ * what to send to it. The button that used to sit here moved testnet balances
+ * between two accounts the project itself controlled, which taught a reviewer
+ * nothing true about funding a treasury. D-024.
  */
-export function Fund({ business, onFund, busy }: {
-  business: BusinessView;
-  onFund: (amountUsdc: string) => void;
-  busy: boolean;
-}) {
+export function Fund({ business }: { business: BusinessView }) {
   const [copied, setCopied] = useState(false);
 
   return (
     <div className="fund">
       <p className="fund-lead">
-        <strong>{business.name} has no money yet.</strong> Send USDC to this address on Arc
-        and it becomes the treasury the agent works with.
+        <strong>{business.name} has no money yet.</strong> Send USDC on Base to this
+        address and it becomes the treasury the agent works with.
       </p>
       <div className="row">
         <code className="addr">{business.address}</code>
@@ -33,14 +34,11 @@ export function Fund({ business, onFund, busy }: {
           }}
         >{copied ? "Copied" : "Copy"}</button>
       </div>
-      <div className="row">
-        <button onClick={() => onFund("5000000")} disabled={busy}>
-          {busy ? "Sending…" : "Send 5 test USDC"}
-        </button>
-        <span className="hint">
-          Testnet only. In production this is your finance team wiring real funds.
-        </span>
-      </div>
+      <p className="hint">
+        Base mainnet, real USDC. This wallet was provisioned with a spending policy
+        already attached — it can move funds into the allowlisted earn vault and
+        nowhere else, whatever the agent proposes.
+      </p>
     </div>
   );
 }

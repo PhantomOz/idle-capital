@@ -4,6 +4,5 @@ export * from "./config.js";
 export * from "./orchestrator.js";
 export * from "./app.js";
 export * from "./parse.js";
-export * from "./faucet.js";
 export * from "./reconciler.js";
 export * from "./schedule.js";

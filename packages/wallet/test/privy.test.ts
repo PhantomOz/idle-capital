@@ -73,9 +73,9 @@ describe("createPrivyClient", () => {
 
 describe("createPrivyTreasury", () => {
   it("counts liquid plus parked as the treasury total", async () => {
-    const arc = { getBalanceUsdcMinor: vi.fn(async () => 12_000_000n) };
+    const balances = { getBalanceUsdcMinor: vi.fn(async () => 12_000_000n) };
     const snap = await createPrivyTreasury({
-      arc: arc as never, address: ADDRESS,
+      balances, address: ADDRESS,
       listPositions: async () => [{ marketId: "earn:v1", amountUsdc: 3_000_000n }],
     }).snapshot();
     expect(snap.totalUsdc).toBe(15_000_000n);
@@ -83,9 +83,9 @@ describe("createPrivyTreasury", () => {
   });
 
   it("reports liquid-only when nothing is parked", async () => {
-    const arc = { getBalanceUsdcMinor: vi.fn(async () => 12_000_000n) };
+    const balances = { getBalanceUsdcMinor: vi.fn(async () => 12_000_000n) };
     const snap = await createPrivyTreasury({
-      arc: arc as never, address: ADDRESS, listPositions: async () => [],
+      balances, address: ADDRESS, listPositions: async () => [],
     }).snapshot();
     expect(snap.totalUsdc).toBe(12_000_000n);
   });

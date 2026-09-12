@@ -32,13 +32,34 @@ export type EarnPosition = {
   totalWithdrawn: bigint;
 };
 
+/**
+ * Privy's four terminal-or-not states for a wallet action, plus our own
+ * `unknown`.
+ *
+ * `unknown` exists because the alternative is worse: mapping an unrecognised
+ * status onto "succeeded" would mark money as landed on the strength of a
+ * string we did not expect. Anything we cannot read is treated as still in
+ * flight and left to the reconciliation sweep.
+ */
+export type EarnActionStatus = "pending" | "succeeded" | "rejected" | "failed" | "unknown";
+
+export type EarnAction = {
+  /** Privy's wallet-action id, a UUID. This becomes the intent's txRef. */
+  id: string;
+  status: EarnActionStatus;
+  /** Vault shares received. Null while the action is still pending. */
+  shareAmount: bigint | null;
+};
+
 export type PrivyClient = {
   signTransaction(tx: ArcTransaction): Promise<Hex>;
   getWallet(): Promise<unknown>;
   earnPosition(vaultId: string): Promise<EarnPosition>;
   earnVault(vaultId: string): Promise<{ id: string; name: string; userApyBps: number; availableLiquidityUsd: number }>;
-  earnDeposit(vaultId: string, amountUsdcMinor: bigint, referenceId: string): Promise<unknown>;
-  earnWithdraw(vaultId: string, amountUsdcMinor: bigint, referenceId: string): Promise<unknown>;
+  earnDeposit(vaultId: string, amountUsdcMinor: bigint, referenceId: string): Promise<EarnAction>;
+  earnWithdraw(vaultId: string, amountUsdcMinor: bigint, referenceId: string): Promise<EarnAction>;
+  /** Read a previously submitted wallet action back, by its UUID. */
+  walletAction(actionId: string): Promise<EarnAction>;
 };
 
 export function createPrivyClient(opts: PrivyOptions): PrivyClient {
@@ -107,15 +128,59 @@ export function createPrivyClient(opts: PrivyOptions): PrivyClient {
       };
     },
 
-    earnDeposit: (vaultId, amountUsdcMinor, referenceId) =>
-      call(`/v1/wallets/${opts.walletId}/earn/ethereum/deposit`, "POST",
-           { vault_id: vaultId, raw_amount: amountUsdcMinor.toString(), reference_id: referenceId }),
+    async earnDeposit(vaultId, amountUsdcMinor, referenceId) {
+      return earnAction(await call(
+        `/v1/wallets/${opts.walletId}/earn/ethereum/deposit`, "POST",
+        { vault_id: vaultId, raw_amount: amountUsdcMinor.toString(), reference_id: referenceId }));
+    },
 
-    earnWithdraw: (vaultId, amountUsdcMinor, referenceId) =>
-      call(`/v1/wallets/${opts.walletId}/earn/ethereum/withdraw`, "POST",
-           { vault_id: vaultId, raw_amount: amountUsdcMinor.toString(), reference_id: referenceId }),
+    async earnWithdraw(vaultId, amountUsdcMinor, referenceId) {
+      return earnAction(await call(
+        `/v1/wallets/${opts.walletId}/earn/ethereum/withdraw`, "POST",
+        { vault_id: vaultId, raw_amount: amountUsdcMinor.toString(), reference_id: referenceId }));
+    },
+
+    async walletAction(actionId) {
+      return earnAction(await call(`/v1/wallets/${opts.walletId}/actions/${actionId}`, "GET"));
+    },
   };
 }
+
+/** Privy's documented status values, and nothing else. */
+const EARN_STATUSES = new Set(["pending", "succeeded", "rejected", "failed"]);
+
+export function parseEarnStatus(v: unknown): EarnActionStatus {
+  return typeof v === "string" && EARN_STATUSES.has(v) ? v as EarnActionStatus : "unknown";
+}
+
+/**
+ * Read Privy's wallet-action envelope.
+ *
+ * Exported so the executor's tests can build a response the same way the
+ * client parses one, rather than each having its own idea of the shape.
+ */
+export function earnAction(out: Record<string, unknown>): EarnAction {
+  const raw = out.share_amount;
+  return {
+    id: typeof out.id === "string" ? out.id : "",
+    status: parseEarnStatus(out.status),
+    shareAmount: typeof raw === "string" && /^\d+$/.test(raw) ? BigInt(raw) : null,
+  };
+}
+
+/**
+ * Anything that can report an address's liquid USDC in minor units.
+ *
+ * Declared structurally rather than as a named chain client so the treasury
+ * does not know which chain it is reading. Both `@idle/chain`'s Arc client and
+ * its Base USDC client satisfy it, and each already owns its own unit
+ * conversion — Arc scales 18-decimal native USDC down, Base scales nothing.
+ * Keeping that knowledge behind this seam is what stopped the move to Base
+ * from becoming a decimals bug in the balance path (D-024).
+ */
+export type LiquidBalanceReader = {
+  getBalanceUsdcMinor(address: Address): Promise<bigint>;
+};
 
 /**
  * The treasury snapshot.
@@ -124,14 +189,14 @@ export function createPrivyClient(opts: PrivyOptions): PrivyClient {
  * (D-011) and conservation is checked against the whole treasury.
  */
 export function createPrivyTreasury(deps: {
-  arc: ArcClient;
+  balances: LiquidBalanceReader;
   address: Address;
   listPositions: () => Promise<Position[]>;
 }) {
   return {
     async snapshot() {
       const [liquid, positions] = await Promise.all([
-        deps.arc.getBalanceUsdcMinor(deps.address),
+        deps.balances.getBalanceUsdcMinor(deps.address),
         deps.listPositions(),
       ]);
       const parked = positions.reduce((sum, p) => sum + p.amountUsdc, 0n);

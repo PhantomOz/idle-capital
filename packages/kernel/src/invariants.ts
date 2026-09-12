@@ -236,3 +236,49 @@ export function k7Liquidity(p: Proposal, s: TreasuryState, pol: Policy): Breach 
   }
   return null;
 }
+
+/**
+ * K9 — minimum economic yield. VETO.
+ *
+ * A venue must be expected to earn at least `minNetYieldBps` of the amount
+ * deployed over the buffer horizon. Below that, parking is not conservative —
+ * it is value-destroying: capital leaves the account, becomes un-spendable
+ * until it is withdrawn, and earns nothing for the privilege.
+ *
+ * This exists because the project spent a week doing exactly that. Execution
+ * sat on a chain whose only reachable venues were ERC-4626 shells with no yield
+ * source behind them; the best of the six measured 0.003% APY over twelve days,
+ * against a round trip that cost 0.005 USDC in gas. Every invariant K1-K8
+ * passed. The proposal was conservative, conserved, allowlisted, diversified,
+ * liquid — and worth less than doing nothing. None of the other invariants ask
+ * whether the trade is worth making at all. D-024.
+ *
+ * A VETO rather than an escalation, for the same reason K4 is: the floor is the
+ * operator's own policy, so a proposal under it is out of policy, not a
+ * judgment call. Asking a human to approve a knowingly-losing trade is how a
+ * guardrail becomes a habit of clicking through.
+ *
+ * Integer arithmetic throughout. `supplyApy` is the one float in the system —
+ * it arrives from a subgraph as a rate, not as money — so it is converted to
+ * basis points once, here, and never multiplied by an amount.
+ */
+export function k9Economics(p: Proposal, s: TreasuryState, pol: Policy): Breach | null {
+  const byId = new Map(s.markets.map((m) => [m.id, m]));
+  for (const a of p.allocations) {
+    const m = byId.get(a.marketId);
+    if (m === undefined) continue; // K3 owns the missing-market case
+
+    // Rate in bps, floored: a venue is never credited with more than it pays.
+    const apyBps = Math.floor(m.supplyApy * 10_000);
+    const horizonBps = Math.floor((apyBps * pol.bufferHorizonDays) / 365);
+    if (horizonBps < pol.minNetYieldBps) {
+      return breach(
+        "K9",
+        `market ${a.marketId} would earn too little over ${pol.bufferHorizonDays} days to be worth committing capital to`,
+        `${horizonBps} bps (${apyBps} bps/yr)`,
+        `${pol.minNetYieldBps} bps`,
+      );
+    }
+  }
+  return null;
+}

@@ -150,10 +150,7 @@ export function App() {
       {!funded && treasury !== null && (
         <section>
           <div className="section-head"><h2>Fund it</h2></div>
-          <Fund
-            business={business} busy={busy}
-            onFund={(amount) => void act(() => api.fund(business.id, amount))}
-          />
+          <Fund business={business} />
         </section>
       )}
 

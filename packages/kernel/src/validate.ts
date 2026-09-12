@@ -1,7 +1,7 @@
 import type { Breach, Policy, Proposal, TreasuryState, Verdict } from "@idle/core";
 import {
   k1BufferCoverage, k2Conservation, k3MarketExists, k4Allowlist,
-  k5Concentration, k6RunMovement, k7Liquidity, k8WellFormed,
+  k5Concentration, k6RunMovement, k7Liquidity, k8WellFormed, k9Economics,
 } from "./invariants.js";
 
 function present(breaches: (Breach | null)[]): Breach[] {
@@ -34,6 +34,7 @@ export function validate(proposal: unknown, state: TreasuryState, policy: Policy
       k1BufferCoverage(p, state, policy),
       k3MarketExists(p, state),
       k4Allowlist(p, state, policy),
+      k9Economics(p, state, policy),
     ]);
     if (vetoes.length > 0) return { kind: "vetoed", breaches: vetoes };
 

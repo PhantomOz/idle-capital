@@ -127,3 +127,27 @@ export function settledPositions(l: Ledger, businessId: string): Position[] {
     .map(([marketId, amountUsdc]) => ({ marketId, amountUsdc }))
     .sort((a, b) => a.marketId.localeCompare(b.marketId));
 }
+
+/**
+ * The wallet that submitted a given transaction reference.
+ *
+ * Reconciliation is handed a txRef and nothing else, but reading a Privy wallet
+ * action back is wallet-scoped (`/v1/wallets/{id}/actions/{actionId}`). This is
+ * the join that lets one status-only sweep cover every tenant without any
+ * tenant's treasury being ambient: the txRef names the intent, the intent names
+ * the run, the run names the business, and the business owns exactly one wallet.
+ *
+ * Returns null for a reference we have no record of, which the caller must treat
+ * as "cannot confirm" rather than "failed".
+ */
+export function walletForTxRef(l: Ledger, txRef: string): string | null {
+  const row = l.raw.prepare(
+    `SELECT b.wallet_id AS wallet_id
+       FROM intents i
+       JOIN runs r      ON r.id = i.run_id
+       JOIN businesses b ON b.id = r.business_id
+      WHERE i.tx_ref = ?
+      LIMIT 1`,
+  ).get(txRef) as { wallet_id: string } | undefined;
+  return row?.wallet_id ?? null;
+}

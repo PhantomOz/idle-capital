@@ -140,10 +140,10 @@ export function Decision({ run, onApprove, onReject, busy }: {
 
       {run.status === "SETTLED" && p !== null && p.allocations.length > 0 && (
         <p className="seam">
-          Settled on Arc, signed by this business&rsquo;s own wallet. Moving the funds into
-          the vault itself is a mainnet step this testnet demo does not take, so the
-          committed balance is this treasury&rsquo;s own record rather than a yield already
-          being collected.
+          Deposited into the earn vault on Base, signed by this business&rsquo;s own
+          wallet under its own spending policy. The committed balance is the
+          vault&rsquo;s answer, not ours &mdash; it is the position Privy reports for this
+          wallet, and it earns from the moment it lands.
         </p>
       )}
 

@@ -35,5 +35,8 @@ export function loadPolicy(env: NodeJS.ProcessEnv = process.env): Policy {
     maxVenueConcentrationBps: int(env, "MAX_VENUE_CONCENTRATION_BPS", 5_000),
     maxRunMovementUsdc: BigInt(env.MAX_RUN_MOVEMENT_USDC ?? "500000000000"),
     minVenueLiquidityUsd: int(env, "MIN_VENUE_LIQUIDITY_USD", 1_000_000),
+    // 5 bps over a 30-day horizon is an APY floor of about 0.61%. It clears
+    // every real USDC venue in the live set and rejects the dead ones.
+    minNetYieldBps: int(env, "MIN_NET_YIELD_BPS", 5),
   };
 }

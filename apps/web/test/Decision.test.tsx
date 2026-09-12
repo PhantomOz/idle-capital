@@ -106,10 +106,22 @@ describe("Decision safety rules", () => {
 });
 
 describe("Decision disclosure", () => {
-  /** Committed is not the same as earning, and the page must not imply it is. */
-  it("says the vault deposit itself is not taken on testnet", () => {
+  /**
+   * The committed figure must be attributed to whoever actually knows it. It
+   * comes from the vault's own position report, so the copy says so — the
+   * previous version disclaimed a deposit the executor never made, and the
+   * failure mode to guard against now is the opposite one: claiming a yield
+   * without saying whose number it is.
+   */
+  it("attributes the committed balance to the vault, not to us", () => {
     render(<Decision run={run()} onApprove={noop} onReject={noop} busy={false} />);
-    expect(screen.getByText(/mainnet step this testnet demo does not take/)).toBeTruthy();
+    expect(screen.getByText(/vault&rsquo;s answer, not ours|vault’s answer, not ours/)).toBeTruthy();
+  });
+
+  it("names the chain and the policy the signature happened under", () => {
+    render(<Decision run={run()} onApprove={noop} onReject={noop} busy={false} />);
+    expect(screen.getByText(/earn vault on Base/)).toBeTruthy();
+    expect(screen.getByText(/own spending policy/)).toBeTruthy();
   });
 
   it("makes no such claim on a run that moved nothing", () => {

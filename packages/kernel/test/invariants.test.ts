@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Market, Policy, Proposal, TreasuryState } from "@idle/core";
 import {
   k1BufferCoverage, k2Conservation, k3MarketExists, k4Allowlist,
-  k5Concentration, k6RunMovement, k7Liquidity, k8WellFormed,
+  k5Concentration, k6RunMovement, k7Liquidity, k8WellFormed, k9Economics,
 } from "../src/index.js";
 
 const ASOF = new Date("2026-09-09T00:00:00Z");
@@ -31,6 +31,7 @@ function policy(over: Partial<Policy> = {}): Policy {
     maxVenueConcentrationBps: 5_000,
     maxRunMovementUsdc: 1_000_000_000n,
     minVenueLiquidityUsd: 1_000_000,
+    minNetYieldBps: 5,
     ...over,
   };
 }
@@ -305,5 +306,76 @@ describe("k7Liquidity", () => {
     const s = state({ markets: [market("m1"), market("m2", { liquidityUsd: 1 })] });
     const p: Proposal = { hold: 0n, allocations: [{ marketId: "m1", amountUsdc: 1n }], rationale: "x" };
     expect(k7Liquidity(p, s, policy())).toBeNull();
+  });
+});
+
+describe("k9Economics", () => {
+  /** The vault the agent actually executes against: 3.96% APY, real. */
+  const EARN = market("privy-earn:v1", { protocol: "privy-earn", supplyApy: 0.0396 });
+  /**
+   * The best of the six ERC-4626 vaults on Arc testnet, as measured from its
+   * own share price over 12.2 days: 1001691 -> 1001692, i.e. 0.003% APY.
+   */
+  const DEAD = market("arc-vault:0x8f2D33", { protocol: "arc-vault", supplyApy: 0.00003 });
+
+  function prop(allocations: { marketId: string; amountUsdc: bigint }[], hold = 2_000_000n): Proposal {
+    return { hold, allocations, rationale: "test" };
+  }
+
+  it("passes a venue that clears the floor over the horizon", () => {
+    const s = state({ totalUsdc: 10_000_000n, markets: [EARN] });
+    expect(k9Economics(prop([{ marketId: EARN.id, amountUsdc: 8_000_000n }]), s,
+      policy({ minNetYieldBps: 5, bufferHorizonDays: 30 }))).toBeNull();
+  });
+
+  // The case that passed K1-K8 for a week while destroying value.
+  it("vetoes a venue whose yield rounds to nothing", () => {
+    const s = state({ totalUsdc: 10_000_000n, markets: [DEAD] });
+    const b = k9Economics(prop([{ marketId: DEAD.id, amountUsdc: 8_000_000n }]), s,
+      policy({ minNetYieldBps: 5, bufferHorizonDays: 30 }));
+    expect(b?.invariant).toBe("K9");
+    expect(b?.observed).toContain("0 bps");
+  });
+
+  it("scales with the horizon: one venue clears 30 days and fails 1", () => {
+    const s = state({ totalUsdc: 10_000_000n, markets: [EARN] });
+    const p = prop([{ marketId: EARN.id, amountUsdc: 8_000_000n }]);
+    expect(k9Economics(p, s, policy({ minNetYieldBps: 5, bufferHorizonDays: 30 }))).toBeNull();
+    expect(k9Economics(p, s, policy({ minNetYieldBps: 5, bufferHorizonDays: 1 }))?.invariant).toBe("K9");
+  });
+
+  it("is scale-invariant — the verdict does not move with the amount", () => {
+    const s = state({ totalUsdc: 10_000_000_000n, markets: [DEAD] });
+    for (const amountUsdc of [1_000n, 8_000_000n, 9_000_000_000n]) {
+      expect(k9Economics(prop([{ marketId: DEAD.id, amountUsdc }], 1_000_000n), s,
+        policy({ minNetYieldBps: 5 }))?.invariant).toBe("K9");
+    }
+  });
+
+  it("rejects the whole proposal if any one venue is uneconomic", () => {
+    const s = state({ totalUsdc: 9_000_000n, markets: [EARN, DEAD] });
+    expect(k9Economics(prop([
+      { marketId: EARN.id, amountUsdc: 4_000_000n },
+      { marketId: DEAD.id, amountUsdc: 4_000_000n },
+    ], 1_000_000n), s, policy({ minNetYieldBps: 5 }))?.invariant).toBe("K9");
+  });
+
+  it("leaves an unknown market to K3 rather than calling it uneconomic", () => {
+    const s = state({ totalUsdc: 2_000_000n, markets: [EARN] });
+    expect(k9Economics(prop([{ marketId: "ghost:1", amountUsdc: 1_000_000n }], 1_000_000n), s,
+      policy({ minNetYieldBps: 5 }))).toBeNull();
+  });
+
+  it("holding everything is always economic — there is nothing to judge", () => {
+    const s = state({ totalUsdc: 10_000_000n, markets: [DEAD] });
+    expect(k9Economics(prop([], 10_000_000n), s, policy({ minNetYieldBps: 500 }))).toBeNull();
+  });
+
+  it("floors the rate rather than rounding up, so a venue is never flattered", () => {
+    // 0.00019 -> 1 bps/yr; over 30 days that is 0 bps, not 1.
+    const thin = market("thin:1", { supplyApy: 0.00019 });
+    const s = state({ totalUsdc: 10_000_000n, markets: [thin] });
+    expect(k9Economics(prop([{ marketId: thin.id, amountUsdc: 1_000_000n }], 1_000_000n), s,
+      policy({ minNetYieldBps: 1, bufferHorizonDays: 30 }))?.invariant).toBe("K9");
   });
 });

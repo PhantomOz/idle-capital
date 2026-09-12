@@ -21,4 +21,17 @@ export type Policy = {
   maxRunMovementUsdc: bigint;
   /** A venue below this liquidity is not safely exitable. */
   minVenueLiquidityUsd: number;
+  /**
+   * The least a venue must be expected to earn, in basis points of the amount
+   * deployed, over `bufferHorizonDays` — the window the treasury plans around
+   * and therefore the longest the capital can be committed.
+   *
+   * Expressed as a rate rather than an absolute sum on purpose: at demo
+   * balances every absolute floor is either unreachable or meaningless, while
+   * a rate floor binds identically at $20 and at $20m.
+   *
+   * This is the invariant the project did not have when it was parking capital
+   * into a venue measured at 0.003% APY. See D-024.
+   */
+  minNetYieldBps: number;
 };
