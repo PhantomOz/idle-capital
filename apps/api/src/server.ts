@@ -170,8 +170,7 @@ const host: TenantHost = {
   ledger, policy, markets, provisioner, depsFor,
   chainId: BASE_MAINNET.id,
   perTxCeilingUsdcMinor: BigInt(process.env.WALLET_TX_CEILING_USDC ?? "10000000"), // 10 USDC
-  vaultAddress: required("PRIVY_EARN_VAULT_ADDRESS") as Address,
-  usdcAddress: BASE_USDC,
+  vaultId,
 };
 
 seedFirstBusiness();

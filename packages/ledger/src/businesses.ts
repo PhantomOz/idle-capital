@@ -129,6 +129,20 @@ export function settledPositions(l: Ledger, businessId: string): Position[] {
 }
 
 /**
+ * Repoint a business at a different policy.
+ *
+ * Exists for one migration: wallets provisioned before D-026 carry a policy
+ * pinned to Arc, which on Base authorises nothing at all — Privy denies whatever
+ * no rule allows. The wallet and its funds stay put; only the envelope around
+ * them is replaced.
+ */
+export function setBusinessPolicy(l: Ledger, businessId: string, policyId: string): void {
+  const res = l.raw.prepare("UPDATE businesses SET policy_id = ? WHERE id = ?")
+    .run(policyId, businessId);
+  if (res.changes === 0) throw new Error(`No business ${businessId} to repolicy`);
+}
+
+/**
  * The wallet that submitted a given transaction reference.
  *
  * Reconciliation is handed a txRef and nothing else, but reading a Privy wallet

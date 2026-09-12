@@ -569,38 +569,75 @@ how a guardrail decays into a habit of clicking through.
 
 ---
 
-## D-026 — The wallet policy guards destinations, because the amount left the value field
+## D-026 — The wallet policy governs the action, not the transaction
 
 **Date:** 2026-09-12 · **Status:** Adopted
 
-A provisioned wallet's policy allowlists the contracts it may call — the vault
-and USDC, plus anything the operator adds — and caps `approve`'s amount with an
-`ethereum_calldata` condition carrying an inline ABI.
+A provisioned wallet's policy carries two rules, both on Privy's Earn *action*
+methods: `earn_deposit`, conditioned on `vault_id` and a `raw_amount` ceiling,
+and `earn_withdraw`, conditioned on `vault_id` alone.
 
-**Why:** the old envelope was one rule: `eth_signTransaction` where
-`chain_id == 5042002` and `value <= ceiling`. Two separate problems with that on
-Base.
+**Why not the old envelope.** It was one rule — `eth_signTransaction` where
+`chain_id == 5042002` and `value <= ceiling` — and it had two independent
+problems on Base. It authorises nothing there, because Privy's engine denies
+whatever no rule allows, so every existing tenant wallet would have refused its
+first Base operation. And its ceiling had quietly stopped meaning anything: on
+Arc USDC *was* the native gas token, so a transfer's amount sat in the
+transaction's `value` field and `value <= ceiling` genuinely bound it, while on
+Base USDC is an ERC-20 — every deposit carries `value: 0` and the amount lives in
+calldata. Ported unchanged, that rule would have been vacuously true for any sum
+whatsoever: a control that still reads like a control in the policy JSON and
+binds nothing.
 
-First, it authorises nothing there. Privy's policy engine denies by default —
-*"if no rules resolve, the policy will default to DENY"* — so a chain-pinned
-rule for Arc is not merely unhelpful off Arc, it is a closed door. Every
-existing tenant wallet would have refused its first Base operation.
+**Why the action level, which took a rejection to learn.** The first replacement
+allowlisted destinations — `to == vault`, `to == USDC` — and capped
+`approve.amount` with an `ethereum_calldata` condition. Privy accepted the policy
+and then refused the deposit outright with `policy_violation`.
 
-Second, and subtler: on Arc USDC *was* the native gas token, so a transfer's
-amount sat in the transaction's `value` field and `value <= ceiling` genuinely
-bound it. On Base, USDC is an ERC-20: every deposit carries `value: 0` and the
-amount lives in calldata. Ported unchanged, the ceiling would have been
-vacuously true for any sum whatsoever — a control that still reads like a
-control in the policy JSON and binds nothing. Capping `approve` restores the
-bound from the other end, since a vault can only pull what it was approved for.
+The reason is in the rejected action's own failure message. Privy fulfils an Earn
+deposit with an **EIP-7702** transaction (type `0x04`) sent to *the wallet's own
+address*, whose calldata is an `execute` batch wrapping `approve(vault, amount)`
+and `deposit(amount, receiver)`. So the outer `to` is the wallet, not the vault,
+and the outer selector is `execute`, not `approve`. Neither rule could ever
+match. They were not merely useless — they read like controls, which is worse.
 
-The unit flips with it, which is the kind of detail that costs real money:
-`approve`'s argument is in USDC's own six decimals — the ledger's minor unit, so
-it passes through unscaled — while the native-value rule is still denominated in
-18 and is still scaled. The same ceiling, written two ways, one line apart.
+`action_request_body` is the level that works: "the request body sent to the API
+before Privy prepares the underlying transactions". `vault_id` and `raw_amount`
+are checked against what we actually asked for, independent of whatever
+transaction shape Privy chooses now or later. And the unit comes out right
+without thinking about it — `raw_amount` is in USDC's six decimals, which is the
+ledger's own minor unit, so the ceiling passes through unscaled.
 
-Destination allowlisting carries the other half because it survives whatever
-calldata Privy chooses to emit. `extraDestinations` exists because Privy
-performs the approval and the deposit itself: if it routes either through a
-helper contract, widening the list is an operator config change rather than a
-code change — and with deny-by-default, guessing too tightly fails closed.
+**Verified, not assumed.** With the ceiling set to 1 USDC against a 3 USDC
+balance, a 2 USDC deposit returns `policy_violation` and a 0.5 USDC deposit is
+accepted. The transaction-level rules were removed once the 7702 shape showed
+they were decoration.
+
+**Withdrawals are deliberately uncapped.** A ceiling on the way out is a trap,
+not a control: the failure it creates is capital that cannot be retrieved in one
+operation. Deposits are bounded because committing capital is the risk;
+withdrawing is how risk is undone.
+
+---
+
+## D-027 — Gas is the operator's problem, and it is tiny
+
+**Date:** 2026-09-12 · **Status:** Adopted
+
+A treasury wallet needs a dust balance of native ETH on Base. The deposit path
+does not sponsor it.
+
+**Why it is worth recording:** Privy's docs say "if your app has gas sponsorship
+configured, usage of the `/earn/ethereum/deposit` endpoint will be gas-sponsored
+by default", which reads like a property of the endpoint. It is a property of the
+*app*. Without sponsorship configured the action is accepted, reaches
+transaction creation, and is then rejected with
+`insufficient funds for gas * price + value: have 0 want 8586890400000` — about
+**$0.00003** of ETH.
+
+The shape of that failure is the useful part. It is not a refusal, it is a
+`rejected` action *after* a `200 pending` response, so a system that treated the
+POST's acknowledgement as success would record a deposit that never happened.
+This is exactly why `checkStatus` maps anything it cannot read as terminal to
+`pending` and never to `confirmed` (D-024), and why the run state machine
+confirms against the venue rather than against its own optimism.

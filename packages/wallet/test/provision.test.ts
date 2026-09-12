@@ -19,11 +19,9 @@ function fakePrivy(over: { policy?: unknown; wallet?: unknown; fail?: string } =
   return { calls, fetchImpl };
 }
 
-const VAULT = "0xa6d1811a72a1cc1a4d536c4476c56da8d234d38d" as const;
-const USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" as const;
+const VAULT_ID = "q52e74l43z9plkapivrldsq3";
 const ARGS = {
-  name: "Acme Trading", perTxCeilingUsdcMinor: 10_000_000n, chainId: 8453,
-  vaultAddress: VAULT, usdcAddress: USDC,
+  name: "Acme Trading", perTxCeilingUsdcMinor: 10_000_000n, vaultId: VAULT_ID,
 };
 
 type Rule = { name: string; method: string; conditions: { field: string; value: string; abi?: unknown }[] };
@@ -34,8 +32,12 @@ async function rulesFor(over: Partial<typeof ARGS> = {}): Promise<Rule[]> {
   return calls[0]?.body.rules as Rule[];
 }
 
-function condition(rules: Rule[], ruleName: string, field: string): string | undefined {
-  return rules.find((r) => r.name === ruleName)?.conditions.find((c) => c.field === field)?.value;
+function ruleFor(rules: Rule[], method: string): Rule | undefined {
+  return rules.find((r) => r.method === method);
+}
+
+function condition(rule: Rule | undefined, field: string): string | undefined {
+  return rule?.conditions.find((c) => c.field === field)?.value;
 }
 
 describe("createPrivyProvisioner", () => {
@@ -63,68 +65,61 @@ describe("createPrivyProvisioner", () => {
   });
 
   /**
-   * A native-value ceiling is denominated in the chain's 18 decimals while the
-   * ledger counts 6, so it is scaled. Copying the ledger's number in would set
-   * a ceiling of 0.00000000001 and refuse everything.
+   * Privy fulfils an Earn deposit with an EIP-7702 transaction sent to the
+   * wallet's own address, wrapping approve+deposit in an `execute` batch. So the
+   * governable level is the action, not the transaction — a rule conditioned on
+   * `to == vault` or decoding `approve.amount` from the outer calldata cannot
+   * match, and an earlier version of this policy carried exactly those. The
+   * deposit they appeared to bound was authorised by the action rule alone.
    */
-  it("scales the native-value ceiling to 18 decimals", async () => {
-    const v = condition(await rulesFor(), "Native transfers under ceiling", "value");
-    expect(BigInt(v ?? "0x0")).toBe(10_000_000_000_000_000_000n); // 10 USDC at 18dp
+  it("governs the action, not the prepared transaction", async () => {
+    const methods = (await rulesFor()).map((r) => r.method);
+    expect(methods).toContain("earn_deposit");
+    expect(methods).toContain("earn_withdraw");
+    expect(methods).not.toContain("eth_sendTransaction");
+    expect(methods).not.toContain("eth_signTransaction");
+  });
+
+  it("binds the deposit to one vault id", async () => {
+    expect(condition(ruleFor(await rulesFor(), "earn_deposit"), "vault_id")).toBe(VAULT_ID);
   });
 
   /**
-   * The mirror of the above, and the one that bit on the move to Base: USDC's
-   * own `approve` argument is already in six decimals, so scaling it would set a
-   * ceiling a trillion times too high — which is to say, no ceiling at all.
+   * raw_amount is in USDC's six decimals, which is the ledger's own minor unit,
+   * so the ceiling passes through unscaled. The Arc policy this replaces had to
+   * scale to eighteen, and getting that backwards in either direction is the
+   * difference between a 10 USDC ceiling and no ceiling at all.
    */
-  it("does NOT scale the approve ceiling, because ERC-20 USDC is already 6dp", async () => {
-    const v = condition(await rulesFor(), "Approve no more than the ceiling", "approve.amount");
-    expect(BigInt(v ?? "0x0")).toBe(10_000_000n); // 10 USDC at 6dp
+  it("caps the deposit amount in the ledger's own unit, unscaled", async () => {
+    const v = condition(ruleFor(await rulesFor(), "earn_deposit"), "raw_amount");
+    expect(v).toBe("10000000"); // 10 USDC at 6dp, not 10e18
+    expect(BigInt(v ?? "0")).toBe(10_000_000n);
   });
 
-  it("carries an ABI on the calldata condition, so Privy can decode the amount", async () => {
-    const rules = await rulesFor();
-    const c = rules.find((r) => r.name === "Approve no more than the ceiling")
-      ?.conditions.find((x) => x.field === "approve.amount");
-    expect(c?.abi).toBeDefined();
-  });
-
-  it("pins every rule to one chain, so a signature elsewhere is not covered", async () => {
-    const rules = await rulesFor();
-    expect(rules.length).toBeGreaterThan(2);
-    for (const r of rules) {
-      expect(r.conditions.find((c) => c.field === "chain_id")?.value).toBe("8453");
+  it("reads the ceiling from the request body, not from a transaction field", async () => {
+    const c = ruleFor(await rulesFor(), "earn_deposit")?.conditions ?? [];
+    expect(c.length).toBeGreaterThan(0);
+    for (const x of c) {
+      expect((x as { field_source?: string }).field_source).toBe("action_request_body");
     }
   });
 
   /**
-   * Privy's policy engine denies anything no rule allows, so the destination
-   * list is the whole of where this wallet can send money.
+   * A ceiling on the way out is a trap, not a control: it creates capital that
+   * cannot be retrieved in one operation.
    */
-  it("allowlists the vault and USDC as destinations", async () => {
+  it("puts no amount ceiling on withdrawals", async () => {
+    const w = ruleFor(await rulesFor(), "earn_withdraw");
+    expect(condition(w, "vault_id")).toBe(VAULT_ID);
+    expect(condition(w, "raw_amount")).toBeUndefined();
+    expect(condition(w, "amount")).toBeUndefined();
+  });
+
+  it("grants no wildcard method, so anything unlisted stays denied", async () => {
     const rules = await rulesFor();
-    const tos = rules.flatMap((r) => r.conditions.filter((c) => c.field === "to").map((c) => c.value));
-    expect(tos).toContain(VAULT);
-    expect(tos).toContain(USDC);
-  });
-
-  it("does not allowlist a destination nobody asked for", async () => {
-    const rules = await rulesFor();
-    const tos = rules.flatMap((r) => r.conditions.filter((c) => c.field === "to").map((c) => c.value));
-    expect(tos).not.toContain("0x000000000000000000000000000000000000dEaD");
-  });
-
-  it("admits extra destinations when the operator configures them", async () => {
-    const helper = "0x1111111111111111111111111111111111111111" as const;
-    const rules = await rulesFor({ extraDestinations: [helper] } as Partial<typeof ARGS>);
-    const tos = rules.flatMap((r) => r.conditions.filter((c) => c.field === "to").map((c) => c.value));
-    expect(tos).toContain(helper);
-  });
-
-  it("grants no wildcard method, so an unlisted RPC call stays denied", async () => {
-    for (const r of await rulesFor()) {
+    expect(rules.length).toBe(2);
+    for (const r of rules) {
       expect(r.method).not.toBe("*");
-      expect(["eth_sendTransaction", "eth_signTransaction"]).toContain(r.method);
       expect(r.conditions.length).toBeGreaterThan(0); // an unconditioned ALLOW is a wildcard by another name
     }
   });

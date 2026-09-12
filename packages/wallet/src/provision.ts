@@ -1,4 +1,3 @@
-import { usdcMinorToWei } from "@idle/chain";
 import type { Address } from "viem";
 
 const API = "https://api.privy.io";
@@ -17,21 +16,8 @@ export type ProvisionArgs = {
   name: string;
   /** Per-transaction ceiling, in USDC minor units (6dp) — the ledger's own unit. */
   perTxCeilingUsdcMinor: bigint;
-  chainId: number;
-  /** The ERC-4626 vault this wallet may move capital into, and nowhere else. */
-  vaultAddress: Address;
-  /** The USDC contract this wallet may approve, for at most the ceiling. */
-  usdcAddress: Address;
-  /**
-   * Additional contracts the wallet may call.
-   *
-   * Exists because Privy performs the approval and the deposit itself, and if
-   * it routes either through a helper contract rather than calling USDC and the
-   * vault directly, a destination allowlist naming only those two would deny the
-   * deposit outright — policies deny by default. Widening the list is then an
-   * operator config change rather than a code change.
-   */
-  extraDestinations?: Address[];
+  /** The Privy Earn vault id this wallet may deposit into, and no other. */
+  vaultId: string;
 };
 
 export type PrivyProvisioner = {
@@ -48,22 +34,10 @@ export function policyLabel(name: string, suffix: string): string {
   return `${trimmed}${suffix}`;
 }
 
-/** ERC-20 `approve`. The one signature in this flow whose shape is certain. */
-const APPROVE_ABI = [{
-  name: "approve",
-  type: "function",
-  inputs: [
-    { name: "spender", type: "address" },
-    { name: "amount", type: "uint256" },
-  ],
-}] as const;
-
 export type EarnPolicyArgs = {
   perTxCeilingUsdcMinor: bigint;
-  chainId: number;
-  vaultAddress: Address;
-  usdcAddress: Address;
-  extraDestinations: Address[];
+  /** The Privy Earn vault id, which is what the policy binds. */
+  vaultId: string;
 };
 
 /**
@@ -71,81 +45,61 @@ export type EarnPolicyArgs = {
  *
  * Privy's policy engine denies by default — "if no rules resolve, the policy
  * will default to DENY" — so this list is exhaustive: anything not described
- * here, the wallet cannot do. That is why the previous envelope, which allowed
- * only `eth_signTransaction` on chain 5042002, could not have authorised a
- * single Base operation.
+ * here, the wallet cannot do. The envelope that shipped before this one allowed
+ * `eth_signTransaction` on chain 5042002 and could not have authorised a single
+ * Base operation.
  *
- * Two layers, because one is not enough:
+ * Two rules, and they are written against the *action* rather than the
+ * transaction. That is not a stylistic choice — it is the only level at which
+ * this flow can be governed, and it took a rejected deposit to establish why.
  *
- * **Where** — one rule per permitted destination. The wallet may call the
- * vault and the USDC contract, and nothing else. A destination allowlist is
- * robust in a way an amount ceiling is not: it survives whatever calldata
- * Privy chooses to emit.
+ * Privy fulfils an Earn deposit with an **EIP-7702** transaction (type `0x04`)
+ * sent to the wallet's *own address*, whose calldata is an `execute` batch
+ * wrapping `approve(vault, amount)` and `deposit(amount, receiver)`. So a
+ * transaction-level rule conditioned on `to == vault`, or decoding
+ * `approve.amount` from the outer calldata, can never match: the outer `to` is
+ * the wallet and the outer selector is `execute`. An earlier version of this
+ * function carried exactly those rules. They were not merely useless — they
+ * read like controls, which is worse, and the deposit they appeared to bound
+ * was authorised by the action rule alone.
  *
- * **How much** — a ceiling on `approve`'s amount. This is the load-bearing
- * half, and it matters because of a gap the move off Arc opened up: on Arc,
- * USDC was the native gas token, so a transfer's amount sat in the
- * transaction's `value` field and `value <= ceiling` bound it. On Base, USDC is
- * an ERC-20, every deposit carries `value: 0`, and the amount lives in
- * calldata — so that old condition would have been vacuously true for any sum.
- * Capping `approve` restores the bound from the other end: a vault can only
- * pull what it was approved for.
+ * `action_request_body` is "the request body sent to the API before Privy
+ * prepares the underlying transactions", so `vault_id` and `raw_amount` are
+ * checked against what we actually asked for. `raw_amount` is in USDC's six
+ * decimals, which is the ledger's own minor unit — the ceiling passes through
+ * unscaled, where the Arc policy it replaces had to scale to eighteen.
  *
- * Note the unit. `approve`'s argument is in USDC's own six decimals, which is
- * exactly the ledger's minor unit, so the ceiling passes through unscaled. The
- * native-value rule below is the opposite case and scales to 18.
+ * **Withdrawals are deliberately uncapped.** A ceiling on the way out is a trap,
+ * not a control: the failure it creates is capital that cannot be retrieved in
+ * one operation. Deposits are bounded because committing capital is the risk;
+ * withdrawing is how risk is undone.
  */
 export function earnPolicyRules(a: EarnPolicyArgs): unknown[] {
-  const destinations = [a.vaultAddress, a.usdcAddress, ...a.extraDestinations];
-  const onChain = {
-    field_source: "ethereum_transaction", field: "chain_id",
-    operator: "eq", value: String(a.chainId),
+  const vaultIs = {
+    field_source: "action_request_body", field: "vault_id",
+    operator: "eq", value: a.vaultId,
   };
 
-  const rules: unknown[] = destinations.map((to, i) => ({
-    name: `Call allowlisted contract ${i + 1}`,
-    method: "eth_sendTransaction",
-    conditions: [
-      onChain,
-      { field_source: "ethereum_transaction", field: "to", operator: "eq", value: to },
-    ],
-    action: "ALLOW",
-  }));
-
-  rules.push({
-    name: "Approve no more than the ceiling",
-    method: "eth_sendTransaction",
-    conditions: [
-      onChain,
-      { field_source: "ethereum_transaction", field: "to", operator: "eq", value: a.usdcAddress },
-      {
-        field_source: "ethereum_calldata",
-        field: "approve.amount",
-        operator: "lte",
-        value: `0x${a.perTxCeilingUsdcMinor.toString(16)}`,
-        abi: APPROVE_ABI,
-      },
-    ],
-    action: "ALLOW",
-  });
-
-  // Native value, scaled to 18 decimals. On Base this is ETH and should never
-  // be used; it is kept so a gas top-up or a native settlement is expressible
-  // without reprovisioning, and it is still bounded.
-  rules.push({
-    name: "Native transfers under ceiling",
-    method: "eth_signTransaction",
-    conditions: [
-      onChain,
-      {
-        field_source: "ethereum_transaction", field: "value", operator: "lte",
-        value: `0x${usdcMinorToWei(a.perTxCeilingUsdcMinor).toString(16)}`,
-      },
-    ],
-    action: "ALLOW",
-  });
-
-  return rules;
+  return [
+    {
+      name: "Deposit into the one allowlisted vault",
+      method: "earn_deposit",
+      conditions: [
+        vaultIs,
+        {
+          field_source: "action_request_body", field: "raw_amount",
+          operator: "lte", value: a.perTxCeilingUsdcMinor.toString(),
+        },
+      ],
+      action: "ALLOW",
+    },
+    {
+      name: "Withdraw from that vault, any amount",
+      method: "earn_withdraw",
+      conditions: [vaultIs],
+      action: "ALLOW",
+    },
+  ];
 }
 
 /**
@@ -187,7 +141,7 @@ export function createPrivyProvisioner(opts: {
 
   return {
     async provision(args) {
-      const { name, perTxCeilingUsdcMinor, chainId, vaultAddress, usdcAddress } = args;
+      const { name, perTxCeilingUsdcMinor, vaultId } = args;
       if (name.trim().length === 0) throw new Error("A business needs a name");
       if (perTxCeilingUsdcMinor <= 0n) {
         throw new Error(`Ceiling must be positive, got ${perTxCeilingUsdcMinor}`);
@@ -197,10 +151,7 @@ export function createPrivyProvisioner(opts: {
         version: "1.0",
         name: policyLabel(name, " treasury envelope"),
         chain_type: "ethereum",
-        rules: earnPolicyRules({
-          perTxCeilingUsdcMinor, chainId, vaultAddress, usdcAddress,
-          extraDestinations: args.extraDestinations ?? [],
-        }),
+        rules: earnPolicyRules({ perTxCeilingUsdcMinor, vaultId }),
       });
       const policyId = policy.id;
       if (typeof policyId !== "string") {
