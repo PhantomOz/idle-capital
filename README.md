@@ -30,14 +30,38 @@ POST /businesses {"name": "Bahari Logistics"}
 Fund it, tell it what the business owes, and ask:
 
 ```
-The Graph        104 markets across 21 protocols, one standardized query
-Agent            keep $2.30 liquid against the 20 Sep payroll, move $2.70
+The Graph        104 markets, 26 standardized subgraphs, one query document
+Agent            hold $1.753336 against four bills; park the $1.246664 surplus
+                 "the eye-catching rates elsewhere sit on venues with negative
+                  or blocked liquidity — money that cannot be withdrawn is not
+                  money earning anything"
 Kernel           K5 ESCALATED — all of the surplus in one venue
                  zero intents created; nothing moves
 [Approve]
-Privy            that business's wallet signs; no private key in this process
-Earn vault       2.70 USDC deposited into Steakhouse Prime USDC, 3.96% APY
+Privy            policy checks earn_deposit: vault_id, raw_amount <= ceiling
+                 EIP-7702 batch — approve(vault, …) then deposit(…)
+Earn vault       succeeded; 1246080834752501076 shares
+Reconcile        { checked: 1, confirmed: 1, failed: 0, stillPending: 0 } → SETTLED
 ```
+
+That is a transcript, not an illustration. The run settled on Base mainnet on
+2026-09-13 against a treasury of three real dollars.
+
+**And the money comes back.** Add a bill due in three days and run it again: the
+agent proposes a smaller allocation, `deriveIntents` emits the *difference* as a
+withdrawal rather than re-depositing from scratch, and the vault pays out on
+demand.
+
+```
+                       liquid        parked         total
+after the deposit     1.753336      1.246663      2.999999
+bill arrives, agent withdraws $0.862500
+after the withdrawal  2.615836      0.384170      3.000006
+```
+
+The total goes **up** across the round trip. That is the yield, at the scale
+three dollars earns it. Total gas for deposit, withdrawal and re-deposit:
+0.0000087 ETH, about three cents.
 
 The agent also refuses. `K9` vetoes a venue that cannot earn its keep over the
 horizon to the next obligation — which is what the six ERC-4626 vaults on Arc
@@ -253,8 +277,8 @@ Everything in this system that is not live, in full:
 | Lending rates and liquidity | **Live** — 26 Messari standardized subgraphs, queried per run |
 | Earn vault APY, liquidity, position | **Live** — Privy Earn API |
 | Treasury balance | **Live** — USDC on Base mainnet, read from the token contract |
-| Deposit and withdrawal | **Live** — Privy Earn into Steakhouse Prime USDC (Morpho, Base). Real USDC; the position figure is the vault's, not ours |
-| Wallet policy enforcement | **Live** — Privy refused an over-ceiling signature under test |
+| Deposit and withdrawal | **Live, and exercised** — Privy Earn into Steakhouse Prime USDC (Morpho, Base). Real USDC, both directions, settled on 2026-09-13. The position figure is the vault's, not ours |
+| Wallet policy enforcement | **Live, and proven** — with the ceiling at 1 USDC and a 3 USDC balance, a 2 USDC deposit returns `policy_violation` and 0.5 USDC is accepted |
 | FX rates | **Fixed table** with an `asOf` date and a source string, surfaced in the UI |
 | Obligations | **Fixture** — company data; there is no feed to read it from |
 | Venue reachability | **One venue.** The agent compares 104 markets across six chains but may only deposit into the one it can reach. The other 103 are the opportunity-cost benchmark — which is what `K9` measures against — not destinations |
