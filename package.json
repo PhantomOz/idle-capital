@@ -13,7 +13,8 @@
     "test:live": "vitest run packages/yields/test/live.integration.test.ts packages/wallet/test/live.integration.test.ts",
     "dev:api": "tsx --env-file-if-exists=.env apps/api/src/server.ts",
     "dev:web": "pnpm --filter @idle/web dev",
-    "repolicy": "tsx --env-file-if-exists=.env apps/api/src/repolicy.ts"
+    "repolicy": "tsx --env-file-if-exists=.env apps/api/src/repolicy.ts",
+    "demo:reset": "tsx --env-file-if-exists=.env apps/api/src/demo-reset.ts"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

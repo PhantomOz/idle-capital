@@ -302,6 +302,7 @@ worth reading.
 | Path | Contents |
 |---|---|
 | `docs/architecture.md` | How it is built and why, with diagrams |
+| `docs/demo.md` | The 3-minute walkthrough, shot by shot, and how to reset between takes |
 | `docs/architecture.md` §11 | Tenancy: how a business gets a wallet nothing else can spend |
 | `DECISIONS.md` | Twenty-six architectural calls, each with its reasoning |
 | `ATTRIBUTION.md` | Which files are AI-generated or AI-assisted, per file |
